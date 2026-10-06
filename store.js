@@ -26,7 +26,7 @@
   /** Nombre normalizado: sin tildes, minúsculas, espacios simples.
    *  Es la clave para que "Banco plano" de Día 1 y Día 3 compartan historial. */
   const normName = (s) =>
-    String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/\s+/g, ' ').trim();
 
   /** Convierte texto a número aceptando coma o punto.
@@ -79,6 +79,7 @@
     return {
       id: s.id ? String(s.id) : uid(),
       created: Number(s.created) || Date.now(),
+      updatedAt: Number(s.updatedAt) || 0,                 // marca de tiempo para la sincronización
       date: /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : todayStr(),
       dayId: String(s.dayId || ''),
       dayName: String(s.dayName || ''),
@@ -108,6 +109,7 @@
     return {
       version: 1,
       weightUnit: d.weightUnit || 'kg',
+      routineUpdatedAt: Number(d.routineUpdatedAt) || 0,   // marca de tiempo para la sincronización
       routine: {
         days: days.map((day, i) => ({
           id: String((day && day.id) || uid()),
@@ -122,14 +124,23 @@
   /* ---------- persistencia ---------- */
 
   /** Guarda todo el estado. Se llama después de cada cambio. */
-  function commit() {
+  function commit(silent) {
+    let ok = true;
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
-      return true;
     } catch (err) {
+      ok = false;
       if (Store.onSaveError) Store.onSaveError(err);
-      return false;
     }
+    // Avisa a cloud.js para que suba los cambios. Los guardados "silenciosos"
+    // (los que vienen de la nube) no lo disparan, para no generar un ciclo.
+    if (!silent && Store.onCommit) Store.onCommit();
+    return ok;
+  }
+
+  /** Copia de seguridad local del estado actual (antes de sobrescribirlo). */
+  function backup() {
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); } catch (e) { /* nada */ }
   }
 
   /** Carga el seed: primero rutina.json por fetch; si no se puede (por ej. al
@@ -340,6 +351,41 @@
     replaceAll(Object.assign({}, state, { routine: seed.routine }));
   }
 
+  /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
+
+  /** Reemplaza la rutina con la de la nube, sin disparar una nueva subida. */
+  function setRoutine(routine, weightUnit, updatedAt) {
+    state.routine = normalize({ routine }).routine;
+    if (weightUnit) state.weightUnit = weightUnit;
+    state.routineUpdatedAt = Number(updatedAt) || 0;
+    commit(true);
+  }
+
+  /** Agrega o reemplaza una sesión que vino de la nube. */
+  function upsertSession(raw) {
+    const s = normSession(raw);
+    const i = state.sessions.findIndex((x) => x.id === s.id);
+    if (i >= 0) state.sessions[i] = s; else state.sessions.push(s);
+    commit(true);
+    return s;
+  }
+
+  /** Quita una sesión borrada en otro dispositivo. Devuelve true si existía. */
+  function removeSession(id) {
+    const n = state.sessions.length;
+    state.sessions = state.sessions.filter((s) => s.id !== id);
+    if (state.sessions.length === n) return false;
+    commit(true);
+    return true;
+  }
+
+  /** Vuelve al estado inicial (otra persona inició sesión en este dispositivo). */
+  async function resetToSeed() {
+    backup();
+    state = normalize(await loadSeed());
+    commit(true);
+  }
+
   /** CSV (separador ";" y coma decimal para abrir bien en Excel es-AR). */
   function exportCSV() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -369,7 +415,9 @@
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
+    backup, setRoutine, upsertSession, removeSession, resetToSeed,
     onSaveError: null,
+    onCommit: null,        // lo asigna cloud.js
   };
   global.Store = Store;
 })(window);

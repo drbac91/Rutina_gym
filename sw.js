@@ -1,20 +1,32 @@
 /* sw.js — Service worker simple para uso offline.
    Estrategia: responde desde caché y actualiza en segundo plano
    (stale-while-revalidate). Para forzar que todos reciban una versión nueva,
-   subí el número de CACHE. */
-const CACHE = 'gym-v1';
-const CHART_CDN = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js';
+   subí el número de CACHE.
+
+   IMPORTANTE: solo toca los archivos de la app y los scripts de las librerías
+   (Chart.js y Firebase). El tráfico de datos y de login de Firebase pasa
+   directo, sin caché: si no, se rompería la sincronización. */
+const CACHE = 'gym-v2';
+const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
+const LIBS = [
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
+  FB + 'firebase-app-compat.js',
+  FB + 'firebase-auth-compat.js',
+  FB + 'firebase-firestore-compat.js',
+];
 const FILES = [
-  './', 'index.html', 'styles.css', 'store.js', 'app.js', 'seed.js',
-  'rutina.json', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
+  './', 'index.html', 'styles.css', 'store.js', 'cloud.js', 'app.js', 'seed.js',
+  'firebase-config.js', 'rutina.json', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
 ];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE).then(async (c) => {
       await c.addAll(FILES);
-      // Chart.js es opcional: si no hay red ahora, se cachea en el primer uso.
-      try { await c.add(new Request(CHART_CDN, { mode: 'no-cors' })); } catch (err) { /* nada */ }
+      // Las librerías son opcionales: si no hay red ahora, se cachean en el primer uso.
+      for (const url of LIBS) {
+        try { await c.add(new Request(url, { mode: 'no-cors' })); } catch (err) { /* nada */ }
+      }
     }).then(() => self.skipWaiting())
   );
 });
@@ -29,6 +41,10 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  const url = e.request.url;
+  const own = new URL(url).origin === self.location.origin;
+  if (!own && !LIBS.includes(url)) return;               // Firebase (datos y login) y todo lo demás: directo a la red
+
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((cached) => {
       const network = fetch(e.request).then((res) => {

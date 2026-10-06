@@ -25,12 +25,19 @@
     <button data-tab="data"><span>💾</span>Datos</button>
   </nav>
 
+  <div id="sync" aria-live="polite" hidden></div>
   <div id="toast" role="status"></div>
 
   <!-- Chart.js por CDN (si no hay conexión la primera vez, solo falla el gráfico) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- Firebase (login + base de datos en la nube). Si no cargan, la app funciona solo local. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="seed.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="store.js"></script>
+  <script src="cloud.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
