@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Gym">
+  <title>Mi Rutina</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="view" aria-live="polite"><p class="empty">Cargando…</p></main>
+
+  <nav id="tabs" aria-label="Secciones">
+    <button data-tab="train"><span>🏋️</span>Entrenar</button>
+    <button data-tab="history"><span>📋</span>Historial</button>
+    <button data-tab="progress"><span>📈</span>Progreso</button>
+    <button data-tab="routine"><span>✏️</span>Rutina</button>
+    <button data-tab="data"><span>💾</span>Datos</button>
+  </nav>
+
+  <div id="toast" role="status"></div>
+
+  <!-- Chart.js por CDN (si no hay conexión la primera vez, solo falla el gráfico) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="seed.js"></script>
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
