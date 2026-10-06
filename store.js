@@ -386,6 +386,43 @@
     commit(true);
   }
 
+  /* ---------- importar SOLO la rutina (el historial no se toca) ---------- */
+
+  const ROUTINE_BACKUP_KEY = 'gymapp.v1.routine-backup';
+
+  /** Valida un JSON con la rutina. Acepta el formato completo de rutina.json
+   *  ({ routine:{days} }) o solo { days }. Devuelve la rutina limpia SIN aplicarla. */
+  function parseRoutineImport(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error('El texto no es un JSON válido.'); }
+    const days = data && (data.routine ? data.routine.days : data.days);
+    if (!Array.isArray(days) || !days.length) throw new Error('No encontré días de rutina ("routine.days") en el JSON.');
+    if (!days.every((d) => d && Array.isArray(d.exercises))) throw new Error('Cada día tiene que tener una lista "exercises".');
+    return normalize({ routine: { days } }).routine;
+  }
+
+  /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer. */
+  function replaceRoutine(routine) {
+    try {
+      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), routine: state.routine }));
+    } catch (e) { /* nada */ }
+    state.routine = routine;
+    commit();                                  // dispara la subida a la nube
+  }
+
+  const hasRoutineBackup = () => { try { return !!localStorage.getItem(ROUTINE_BACKUP_KEY); } catch (e) { return false; } };
+
+  /** Vuelve a la rutina anterior a la última importación. Devuelve true si pudo. */
+  function restoreRoutineBackup() {
+    try {
+      const b = JSON.parse(localStorage.getItem(ROUTINE_BACKUP_KEY));
+      state.routine = normalize({ routine: b.routine }).routine;
+      localStorage.removeItem(ROUTINE_BACKUP_KEY);
+      commit();
+      return true;
+    } catch (e) { return false; }
+  }
+
   /** CSV (separador ";" y coma decimal para abrir bien en Excel es-AR). */
   function exportCSV() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -416,6 +453,7 @@
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
     backup, setRoutine, upsertSession, removeSession, resetToSeed,
+    parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     onSaveError: null,
     onCommit: null,        // lo asigna cloud.js
   };
