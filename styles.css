@@ -320,3 +320,12 @@ body.gate { padding-bottom: 16px; }
 .ssset .x { padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
 .setw:has(.ssset) { padding-bottom: 10px; margin-bottom: 10px; border-bottom: .5px solid var(--sep); }
 .setw:has(.ssset):last-of-type { border-bottom: 0; margin-bottom: 0; }
+
+/* ---------- campo de fecha: en iOS ignora el ancho y se sale de la tarjeta ---------- */
+input[type="date"] {
+  -webkit-appearance: none; appearance: none;   /* quita el estilo nativo que fuerza su propio ancho */
+  display: block; width: 100%; max-width: 100%; min-width: 0;
+  text-align: left; line-height: 1.2;
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
+input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
