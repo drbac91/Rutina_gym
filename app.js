@@ -347,10 +347,56 @@
      DATOS (exportar / importar)
      ====================================================================== */
 
+  const STATUS_TXT = {
+    synced: '☁ Sincronizado', syncing: '☁ Sincronizando…',
+    offline: '☁ Sin conexión (se sube al volver)', error: '☁ Error de sincronización',
+  };
+
+  /** Tarjeta de cuenta: estado del login y de la sincronización. */
+  function accountCard() {
+    if (!window.Cloud || !Cloud.available) {
+      return `<div class="card stack"><h2>Cuenta</h2>
+        <p class="muted">La sincronización en la nube no está disponible (sin conexión al cargar la app o abierta como archivo). Los datos se guardan solo en este dispositivo.</p></div>`;
+    }
+    if (!Cloud.user) {
+      return `<div class="card stack"><h2>Cuenta</h2>
+        <p class="muted">Sin sesión: los datos se guardan solo en este dispositivo.</p>
+        <button class="primary block" data-act="login">Iniciar sesión con Google</button></div>`;
+    }
+    return `<div class="card stack"><h2>Cuenta</h2>
+      <p>${esc(Cloud.user.email)}</p>
+      <p class="muted">${STATUS_TXT[Cloud.status] || ''}</p>
+      ${Cloud.lastError ? `<p class="err">${esc(Cloud.lastError)}</p>` : ''}
+      <button class="block" data-act="logout">Cerrar sesión</button></div>`;
+  }
+
+  function viewLogin() {
+    return `
+      <div class="login">
+        <div class="logo">🏋️</div>
+        <h1>Mi Rutina</h1>
+        <p class="muted">Iniciá sesión para guardar tus entrenamientos en la nube y no perderlos nunca.</p>
+        <button class="primary block" data-act="login">Entrar con Google</button>
+        <p class="err" id="login-err"></p>
+        <button class="link-btn" data-act="skip-login">Usar sin cuenta (solo en este dispositivo)</button>
+      </div>`;
+  }
+
+  /** Traduce errores de login a mensajes comprensibles. */
+  function loginErrorText(e) {
+    const m = {
+      'auth/unauthorized-domain': 'Esta dirección web no está autorizada en Firebase (Authentication → Configuración → Dominios autorizados).',
+      'auth/network-request-failed': 'No hay conexión a internet.',
+      'auth/operation-not-allowed': 'El login con Google no está activado en Firebase.',
+    };
+    return m[e.code] || ('No se pudo iniciar sesión: ' + (e.message || e.code || e));
+  }
+
   function viewData() {
     const n = S.state.sessions.filter((s) => s.finished).length;
     return `
       <h1>Datos y backup</h1>
+      ${accountCard()}
       <div class="card stack">
         <h2>Backup</h2>
         <p class="muted">${n} sesión(es) guardadas. Tus datos viven solo en este dispositivo: hacé un backup de vez en cuando.</p>
@@ -389,10 +435,25 @@
 
   const views = { train: viewTrain, history: viewHistory, progress: viewProgress, routine: viewRoutine, data: viewData };
 
+  /** Hay nube disponible pero todavía no inició sesión ni eligió "sin cuenta". */
+  const gated = () => !!(window.Cloud && Cloud.available && !Cloud.user && !Cloud.skipped);
+
   function render() {
+    document.body.classList.toggle('gate', gated());
+    updateSyncBadge();
+    if (gated()) { $view.innerHTML = viewLogin(); return; }
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
     $view.innerHTML = views[ui.tab]();
     if (ui.tab === 'progress') drawChart();
+  }
+
+  /** Indicador chico arriba a la derecha con el estado de la sincronización. */
+  function updateSyncBadge() {
+    const el = document.getElementById('sync');
+    const st = window.Cloud && Cloud.user ? Cloud.status : 'off';
+    el.hidden = st === 'off';
+    el.className = st;
+    el.textContent = STATUS_TXT[st] || '';
   }
 
   function go(tab) {
@@ -507,6 +568,25 @@
         break;
       }
 
+      /* --- cuenta --- */
+      case 'login':
+        btn.disabled = true;
+        try { await Cloud.signIn(); } catch (err) {
+          const box = document.getElementById('login-err');
+          if (box) box.textContent = loginErrorText(err); else alert(loginErrorText(err));
+        }
+        btn.disabled = false;
+        break;
+      case 'skip-login': Cloud.skip(); break;
+      case 'logout': {
+        const pending = Cloud.status === 'syncing' || Cloud.status === 'offline';
+        const msg = pending
+          ? 'Hay cambios que todavía no se subieron a la nube. Si cerrás sesión ahora se conservan en este dispositivo y se suben la próxima vez que entres. ¿Cerrar sesión?'
+          : '¿Cerrar sesión? Tus datos quedan guardados en la nube.';
+        if (confirm(msg)) await Cloud.signOut();
+        break;
+      }
+
       /* --- datos --- */
       case 'export-json': download(`rutina-gym-backup-${S.todayStr()}.json`, S.exportJSON(), 'application/json'); toast('Backup descargado'); break;
       case 'export-csv': download(`historial-gym-${S.todayStr()}.csv`, S.exportCSV(), 'text/csv;charset=utf-8'); toast('CSV descargado'); break;
@@ -599,9 +679,34 @@
 
   S.onSaveError = () => toast('⚠ No se pudo guardar (almacenamiento lleno o bloqueado)');
 
-  S.init().then(render).catch((err) => {
-    $view.innerHTML = `<p class="empty">Error al iniciar: ${esc(err.message)}</p>`;
+  /* Datos nuevos de la nube (ej.: cargaste algo desde otro dispositivo). Si estás
+     escribiendo en un campo se espera a que termines para no cortarte la edición. */
+  let renderPending = false;
+  const typing = () => {
+    const a = document.activeElement;
+    return !!(a && $view.contains(a) && a.matches('input, textarea, select'));
+  };
+  $view.addEventListener('focusout', () => {
+    if (!renderPending) return;
+    setTimeout(() => { if (!typing()) { renderPending = false; render(); } }, 350);
   });
+
+  if (window.Cloud) {
+    Cloud.onChange = () => {
+      // Cambió el login o el estado: solo se redibuja si cambió algo visible importante.
+      if (gated() !== document.body.classList.contains('gate') || ui.tab === 'data') {
+        if (typing()) renderPending = true; else render();
+      } else updateSyncBadge();
+    };
+    Cloud.onRemote = () => { if (typing()) renderPending = true; else render(); };
+  }
+
+  S.init()
+    .then(() => (window.Cloud ? Cloud.init() : null))
+    .then(render)
+    .catch((err) => {
+      $view.innerHTML = `<p class="empty">Error al iniciar: ${esc(err.message)}</p>`;
+    });
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* sin offline, pero la app sigue */ });

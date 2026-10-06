@@ -178,3 +178,20 @@ details.exe .body { padding: 0 12px 12px; }
   max-width: 90vw; font-size: .9rem; transition: .2s;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- nube: indicador, login ---------- */
+#sync {
+  position: fixed; top: calc(8px + env(safe-area-inset-top)); right: 10px; z-index: 15;
+  font-size: .72rem; padding: 3px 10px; border-radius: 99px;
+  background: var(--card2); color: var(--muted); border: 1px solid var(--border);
+}
+#sync.synced { color: var(--ok); }
+#sync.error { color: var(--danger); }
+#sync.offline { color: var(--warn); }
+body.gate #tabs, body.gate #sync { display: none; }
+body.gate { padding-bottom: 16px; }
+.login { text-align: center; padding-top: 12vh; }
+.login .logo { font-size: 3rem; }
+.login p { margin: 10px 0 20px; }
+.link-btn { background: none; border: 0; color: var(--muted); text-decoration: underline; min-height: 44px; margin-top: 6px; }
+.err { color: var(--danger); font-size: .85rem; margin: 6px 0; }
