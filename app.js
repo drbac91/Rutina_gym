@@ -34,6 +34,9 @@
 
   const isRevisar = (txt) => /\bREVISAR\b/.test(txt || '');
 
+  /** Vibración muy corta al completar algo (Android; en iPhone no existe y se ignora). */
+  const haptic = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* nada */ } };
+
   let toastTimer;
   function toast(msg) {
     const t = document.getElementById('toast');
@@ -52,8 +55,14 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  /** Una serie es válida para marcarla si tiene reps > 0 y peso vacío o >= 0. */
-  const setValid = (st) => st.reps > 0 && (st.weight == null || st.weight >= 0);
+  /** Texto de una serie: "20×10" o, con drop set, "20×10 + 15×10". */
+  const fmtSet = (st) => `${fmt(st.weight) || '–'}×${st.reps ?? '–'}`
+    + (st.drop ? ` + ${fmt(st.drop.weight) || '–'}×${st.drop.reps ?? '–'}` : '');
+
+  /** Una serie es válida para marcarla si tiene reps > 0 y peso vacío o >= 0.
+   *  Si tiene parte drop con datos, también necesita reps > 0 (el drop vacío se ignora). */
+  const setValid = (st) => st.reps > 0 && (st.weight == null || st.weight >= 0)
+    && (!st.drop || (st.drop.weight == null && st.drop.reps == null) || st.drop.reps > 0);
 
   /** Sincroniza el flag "done" del ejercicio con sus series. */
   const syncEx = (ex) => { ex.done = ex.sets.length > 0 && ex.sets.every((st) => st.done); };
@@ -96,9 +105,10 @@
   function trainSession(s) {
     const editing = !!ui.editId;
     const exCards = s.exercises.map((ex, i) => {
-      const last = S.lastEntry(ex.name, s.id);
+      const last = S.lastEntry(ex.name, s.id, s.dayId);
+      const otherDay = last && last.dayId !== s.dayId && last.dayName ? ' · ' + esc(last.dayName) : '';
       const prev = last
-        ? `Última vez (${fmtShort(last.date)}): ` + last.sets.map((st) => `${fmt(st.weight) || '–'}×${st.reps ?? '–'}`).join(' · ')
+        ? `Última vez (${fmtShort(last.date)}${otherDay}): ` + last.sets.map(fmtSet).join(' · ')
         : 'Sin registros previos';
       const t = ex.target || {};
       const target = `${t.sets || ex.sets.length}×${esc(t.reps)}${t.weight != null ? ' · ' + fmt(t.weight) + ' ' + unit() : ''}`;
@@ -108,11 +118,12 @@
         ${exerciseNote(s, i)}
         <p class="prev">${prev}</p>
         <div class="set-head"><span>#</span><span>${unit()}</span><span>reps</span><span></span><span></span></div>
-        ${ex.sets.map((st, j) => setRow(st, j)).join('')}
+        ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
           <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Deshacer' : '✓ Completar'}</button>
         </div>
+        <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
       </section>`;
     }).join('');
 
@@ -140,18 +151,33 @@
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${esc(re.notes)}</div>`;
   }
 
-  function setRow(st, j) {
+  /** Una serie = fila principal + (si el ejercicio es drop set) una segunda línea
+   *  "↳" con el peso menor y las reps que se hacen enseguida, sin pausa. */
+  function setRow(st, j, ex) {
+    const drop = ex.drop ? `
+      <div class="dropline">
+        <span class="arrow" title="Drop set: sin pausa, con menos peso">↳</span>
+        <div class="stepper">
+          <button data-act="dw-" aria-label="Menos peso del drop">−</button>
+          <input inputmode="decimal" data-f="dweight" value="${fmt(st.drop && st.drop.weight)}" placeholder="drop kg" aria-label="Peso del drop">
+          <button data-act="dw+" aria-label="Más peso del drop">+</button>
+        </div>
+        <input class="reps" inputmode="numeric" data-f="dreps" value="${st.drop && st.drop.reps != null ? st.drop.reps : ''}" placeholder="reps" aria-label="Repeticiones del drop">
+        <span></span><span></span>
+      </div>` : '';
     return `
-    <div class="set ${st.done ? 'done' : ''}" data-set="${j}">
-      <span class="n">${j + 1}</span>
-      <div class="stepper">
-        <button data-act="w-" aria-label="Menos peso">−</button>
-        <input inputmode="decimal" data-f="weight" value="${fmt(st.weight)}" placeholder="0" aria-label="Peso">
-        <button data-act="w+" aria-label="Más peso">+</button>
-      </div>
-      <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones">
-      <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
-      <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+    <div class="setw" data-set="${j}">
+      <div class="set ${st.done ? 'done' : ''}">
+        <span class="n">${j + 1}</span>
+        <div class="stepper">
+          <button data-act="w-" aria-label="Menos peso">−</button>
+          <input inputmode="decimal" data-f="weight" value="${fmt(st.weight)}" placeholder="0" aria-label="Peso">
+          <button data-act="w+" aria-label="Más peso">+</button>
+        </div>
+        <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones">
+        <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
+        <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+      </div>${drop}
     </div>`;
   }
 
@@ -191,9 +217,9 @@
     if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. ¡Empezá a entrenar!</p>';
     return '<h1>Historial</h1>' + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
-        .reduce((b, x) => b + (x.weight || 0) * (x.reps || 0), 0), 0);
+        .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
-        const sets = ex.sets.filter((x) => x.done).map((x) => `${fmt(x.weight) || '–'}×${x.reps ?? '–'}`).join(', ');
+        const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
         return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}</div>` : '';
       }).join('');
       return `
@@ -276,7 +302,7 @@
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { color: c('--text') } } },
+        plugins: { legend: { labels: { color: c('--text'), usePointStyle: true, boxWidth: 8, boxHeight: 8 } } },
         scales: {
           x: { ticks: { color: c('--muted') }, grid: { color: c('--border') } },
           y: { position: 'left', beginAtZero: true, ticks: { color: c('--accent') }, grid: { color: c('--border') } },
@@ -488,6 +514,7 @@
     if (tab !== 'train') ui.editId = null;   // salir de Entrenar cierra la edición
     ui.tab = tab;
     render();
+    $view.classList.remove('enter'); void $view.offsetWidth; $view.classList.add('enter');
     window.scrollTo(0, 0);
   }
 
@@ -528,16 +555,43 @@
         c.st.weight = next; S.commit();
         break;
       }
+      case 'dw-': case 'dw+': {
+        const input = btn.parentElement.querySelector('input');
+        const cur = S.parseNum(input.value);
+        // Si el drop está vacío, se parte del peso de la serie principal.
+        const base = Number.isNaN(cur) || cur == null ? (c.st.weight || 0) : cur;
+        const next = Math.max(0, Math.round((base + (act === 'dw+' ? 2.5 : -2.5)) * 100) / 100);
+        input.value = fmt(next); input.classList.remove('invalid');
+        c.st.drop = c.st.drop || S.blankDrop(c.ex.target && c.ex.target.reps);
+        c.st.drop.weight = next; S.commit();
+        break;
+      }
+      case 'toggle-drop':
+        c.ex.drop = !c.ex.drop;
+        c.ex.sets.forEach((st) => {
+          st.drop = c.ex.drop ? (st.drop || S.blankDrop(c.ex.target && c.ex.target.reps)) : null;
+        });
+        S.commit(); render();
+        break;
       case 'toggle-set':
         if (!c.st.done && !setValid(c.st)) { toast('Cargá las repeticiones primero'); break; }
         c.st.done = !c.st.done; syncEx(c.ex); S.commit(); refreshDone(c.card, c.ex);
+        if (c.st.done) {                                   // pulso en el tilde, en el mismo instante
+          const chk = c.row.querySelector('.chk');
+          chk.classList.remove('pop'); void chk.offsetWidth; chk.classList.add('pop');
+          haptic(12);
+        }
         break;
       case 'del-set':
         c.ex.sets.splice(c.j, 1); syncEx(c.ex); S.commit(); render();
         break;
       case 'add-set': {
         const prev = c.ex.sets[c.ex.sets.length - 1];
-        c.ex.sets.push({ weight: prev ? prev.weight : null, reps: prev ? prev.reps : null, note: '', done: false });
+        c.ex.sets.push({
+          weight: prev ? prev.weight : null, reps: prev ? prev.reps : null,
+          drop: c.ex.drop ? (prev && prev.drop ? Object.assign({}, prev.drop) : S.blankDrop(c.ex.target && c.ex.target.reps)) : null,
+          note: '', done: false,
+        });
         c.ex.done = false; S.commit(); render();
         break;
       }
@@ -551,6 +605,7 @@
           if (skipped) toast(`${skipped} serie(s) sin reps quedaron sin marcar`);
         }
         S.commit(); refreshDone(c.card, c.ex);
+        if (c.ex.done) haptic(18);
         break;
       case 'finish': finishSession(); break;
       case 'discard':
@@ -651,6 +706,20 @@
       return;
     }
 
+    // Sesión: peso / reps de la parte drop de una serie
+    if (el.dataset.f === 'dweight' || el.dataset.f === 'dreps') {
+      const { st, ex } = ctx(el);
+      if (!st) return;
+      const key = el.dataset.f === 'dweight' ? 'weight' : 'reps';
+      let v = S.parseNum(el.value);
+      if (key === 'reps' && !Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
+      el.classList.toggle('invalid', Number.isNaN(v));
+      if (Number.isNaN(v)) return;
+      st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps);
+      st.drop[key] = v; S.commit();
+      return;
+    }
+
     // Rutina: nombre del día
     if (el.dataset.df === 'name') {
       const d = S.find(S.state.routine.days, el.closest('[data-day]').dataset.day);
@@ -703,10 +772,20 @@
     if (el.classList.contains('invalid')) {
       toast('Valor no válido: se restauró el anterior');
       const { st } = ctx(el);
-      if (st && (el.dataset.f === 'weight' || el.dataset.f === 'reps')) {
-        el.value = el.dataset.f === 'weight' ? fmt(st.weight) : (st.reps ?? '');
+      if (st && ['weight', 'reps', 'dweight', 'dreps'].includes(el.dataset.f)) {
+        const d = st.drop || {};
+        el.value = { weight: fmt(st.weight), reps: st.reps ?? '', dweight: fmt(d.weight), dreps: d.reps ?? '' }[el.dataset.f];
         el.classList.remove('invalid');
       } else render();
+    }
+  });
+
+  /* Al tocar peso o reps se selecciona todo el contenido: se escribe encima, sin borrar antes.
+     (El teclado numérico ya se abre solo por inputmode="decimal"/"numeric".) */
+  $view.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if (el.matches && el.matches('.setw input[data-f]')) {
+      setTimeout(() => { try { el.select(); el.setSelectionRange(0, 99); } catch (err) { /* nada */ } }, 0);
     }
   });
 

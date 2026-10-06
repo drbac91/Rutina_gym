@@ -64,15 +64,33 @@
 
   function normSet(s) {
     s = s || {};
-    const w = s.weight == null ? null : Number(s.weight);
-    const r = s.reps == null ? null : Number(s.reps);
+    const num = (v) => { const n = v == null ? null : Number(v); return Number.isFinite(n) && n >= 0 ? n : null; };
+    // "drop": segunda parte de la MISMA serie, sin pausa, con menos peso (ej.: 10×20 kg + 10×15 kg).
+    const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps) } : null;
     return {
-      weight: Number.isFinite(w) && w >= 0 ? w : null,
-      reps: Number.isFinite(r) && r >= 0 ? r : null,
+      weight: num(s.weight),
+      reps: num(s.reps),
+      drop: drop && (drop.weight != null || drop.reps != null) ? drop : null,
       note: String(s.note || ''),
       done: s.done !== false,          // datos viejos sin "done" cuentan como hechos
     };
   }
+
+  /** ¿Este ejercicio de la rutina se hace con drop set? Reps tipo "10-10" (dos números
+   *  iguales) o la palabra "drop" en las notas. Un rango como "12-15" NO es drop set. */
+  function isDropExercise(ex) {
+    const m = String(ex.reps || '').match(/^\s*(\d+)\s*[-–]\s*(\d+)\s*$/);
+    return !!(m && m[1] === m[2]) || /drop/i.test(String(ex.notes || ''));
+  }
+
+  /** Segunda parte vacía para una serie con drop: peso a completar, reps = 2º número de "10-10". */
+  function blankDrop(reps) {
+    const m = String(reps || '').match(/\d+/g);
+    return { weight: null, reps: m && m.length > 1 ? Number(m[1]) : (m ? Number(m[0]) : null) };
+  }
+
+  /** Volumen de una serie (peso × reps, más la parte drop si la tiene). */
+  const setVolume = (st) => (st.weight || 0) * (st.reps || 0) + (st.drop ? (st.drop.weight || 0) * (st.drop.reps || 0) : 0);
 
   function normSession(s) {
     s = s || {};
@@ -90,6 +108,7 @@
         return {
           name: String((ex && ex.name) || 'Ejercicio'),
           done: !!(ex && ex.done),
+          drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
           target: {
             sets: Number(t.sets) || 0,
             reps: t.reps == null ? '' : String(t.reps),
@@ -223,19 +242,29 @@
     state.sessions.slice().sort((a, b) => (a.date === b.date ? a.created - b.created : a.date < b.date ? -1 : 1));
 
   /** Último registro del ejercicio (por nombre normalizado), excluyendo una sesión.
-   *  Devuelve { date, sets:[...hechas] } o null. */
-  function lastEntry(name, excludeId) {
+   *  Prioriza la última sesión del MISMO día de rutina (así "Banco plano" del Día 1
+   *  se prellena con lo que hiciste el Día 1, no con el Día 3); si ese día nunca lo
+   *  hizo, usa la más reciente de cualquier día. El historial para el gráfico sigue
+   *  compartido por nombre. Devuelve { date, dayId, dayName, sets:[...hechas] } o null. */
+  function lastEntry(name, excludeId, dayId) {
     const key = normName(name);
     const list = sortedSessions().reverse();
-    for (const s of list) {
-      if (s.id === excludeId) continue;
-      for (const ex of s.exercises) {
-        if (normName(ex.name) !== key) continue;
-        const done = ex.sets.filter((st) => st.done);
-        if (done.length) return { date: s.date, sets: done.map((st) => Object.assign({}, st)) };
+    const search = (onlyDay) => {
+      for (const s of list) {
+        if (s.id === excludeId) continue;
+        if (onlyDay && s.dayId !== dayId) continue;
+        for (const ex of s.exercises) {
+          if (normName(ex.name) !== key) continue;
+          const done = ex.sets.filter((st) => st.done);
+          if (done.length) {
+            return { date: s.date, dayId: s.dayId, dayName: s.dayName,
+                     sets: done.map((st) => Object.assign({}, st, { drop: st.drop ? Object.assign({}, st.drop) : null })) };
+          }
+        }
       }
-    }
-    return null;
+      return null;
+    };
+    return (dayId && search(true)) || search(false);
   }
 
   const firstInt = (txt) => {
@@ -251,17 +280,19 @@
       id: uid(), created: Date.now(), date: todayStr(),
       dayId: day.id, dayName: day.name, finished: false,
       exercises: day.exercises.map((ex) => {
-        const last = lastEntry(ex.name);
+        const last = lastEntry(ex.name, null, day.id);
         const sets = [];
+        const drop = isDropExercise(ex);
         for (let i = 0; i < ex.sets; i++) {
           const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
           sets.push({
             weight: src ? src.weight : ex.targetWeight,
             reps: src ? src.reps : firstInt(ex.reps),
+            drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
             note: '', done: false,
           });
         }
-        return { name: ex.name, done: false,
+        return { name: ex.name, done: false, drop,
                  target: { sets: ex.sets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
@@ -314,7 +345,7 @@
           if (!st.done) return;
           found = true;
           const w = st.weight || 0, r = st.reps || 0;
-          vol += w * r;
+          vol += setVolume(st);
           if (w > max) { max = w; maxReps = r; } else if (w === max && r > maxReps) maxReps = r;
         });
       });
@@ -427,17 +458,18 @@
   function exportCSV() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
     const n = (v) => (v == null ? '' : String(v).replace('.', ','));
-    const rows = [['Fecha', 'Día', 'Ejercicio', 'Serie', 'Peso (' + state.weightUnit + ')', 'Reps', 'Nota'].map(q).join(';')];
+    const rows = [['Fecha', 'Día', 'Ejercicio', 'Serie', 'Peso (' + state.weightUnit + ')', 'Reps', 'Peso drop (' + state.weightUnit + ')', 'Reps drop', 'Nota'].map(q).join(';')];
     sortedSessions().forEach((s) => {
       if (!s.finished) return;
       s.exercises.forEach((ex) => {
         ex.sets.forEach((st, i) => {
           if (!st.done) return;
-          rows.push([q(s.date), q(s.dayName), q(ex.name), i + 1, n(st.weight), n(st.reps), q(st.note)].join(';'));
+          rows.push([q(s.date), q(s.dayName), q(ex.name), i + 1, n(st.weight), n(st.reps),
+                     n(st.drop && st.drop.weight), n(st.drop && st.drop.reps), q(st.note)].join(';'));
         });
       });
     });
-    return '﻿' + rows.join('\r\n');   // BOM para que Excel respete los acentos
+    return '\ufeff' + rows.join('\r\n');   // BOM para que Excel respete los acentos
   }
 
   /* ---------- API pública ---------- */
@@ -449,6 +481,7 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
+    isDropExercise, blankDrop, setVolume,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
