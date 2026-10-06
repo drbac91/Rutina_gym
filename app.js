@@ -122,7 +122,7 @@
         <div class="ex-head"><h3>${esc(ex.name)}</h3><span class="target">${targetText(ex)}</span></div>
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
-        <div class="set-head"><span>#</span><span>${unit()}</span><span>reps</span><span></span><span></span></div>
+        <div class="set-head"><span>#</span><span>${ex.bar != null ? unit() + ' por lado' : unit()}</span><span>reps</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
@@ -145,14 +145,11 @@
         if (!st) return '';
         return `
           <div class="ssline" data-ex="${i}">
-            <span class="ssname">${esc(s.exercises[i].name)}</span>
+            <span class="ssname">${esc(s.exercises[i].name)}${s.exercises[i].bar != null ? ' · discos por lado' : ''}</span>
             <div class="ssinputs">
-              <div class="stepper">
-                <button data-act="w-" aria-label="Menos peso">−</button>
-                <input inputmode="decimal" data-f="weight" value="${fmt(st.weight)}" placeholder="0" aria-label="Peso de ${esc(s.exercises[i].name)}">
-                <button data-act="w+" aria-label="Más peso">+</button>
-              </div>
+              ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
+              ${totCaption(st, s.exercises[i], false)}
             </div>
           </div>`;
       }).join('');
@@ -211,32 +208,66 @@
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
 
+  /* ---------- peso: directo, o por lado si el ejercicio usa barra ---------- */
+
+  /** Texto del total bajo el campo: "= 60 kg" (o el peso de la barra si todavía está vacío). */
+  function totText(st, ex, isDrop) {
+    const w = isDrop ? (st.drop && st.drop.weight) : st.weight;
+    return w != null ? `= ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
+  }
+
+  /** Campo de peso con sus botones −/+. Con barra se cargan los discos POR LADO. */
+  function weightField(st, ex, isDrop, aria) {
+    const perSide = ex.bar != null;
+    const src = isDrop ? (st.drop || {}) : st;
+    const f = (isDrop ? 'd' : '') + (perSide ? 'side' : 'weight');
+    const val = perSide ? S.sideOf(src, ex.bar) : src.weight;
+    const ph = perSide ? 'x lado' : (isDrop ? 'drop kg' : '0');
+    return `
+        <div class="stepper">
+          <button data-act="${isDrop ? 'dw-' : 'w-'}" aria-label="Menos peso">−</button>
+          <input inputmode="decimal" data-f="${f}" value="${fmt(val)}" placeholder="${ph}" aria-label="${aria}${perSide ? ' (discos por lado)' : ''}">
+          <button data-act="${isDrop ? 'dw+' : 'w+'}" aria-label="Más peso">+</button>
+        </div>`;
+  }
+  const totCaption = (st, ex, isDrop) => (ex.bar != null ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
+
+  /** Guarda un peso tecleado. Con barra: discos por lado → total = barra + 2 × lado. */
+  function setWeight(st, ex, f, v) {
+    if (f === 'weight') { st.weight = v; return; }
+    if (f === 'side') { st.side = v; st.weight = S.barTotal(ex.bar, v); return; }
+    st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps);
+    if (f === 'dweight') st.drop.weight = v;
+    else { st.drop.side = v; st.drop.weight = S.barTotal(ex.bar, v); }
+  }
+
+  /** Refresca el "= total" junto al campo, sin redibujar (no se pierde el foco). */
+  function updateTot(input, st, ex) {
+    const holder = input.closest('.set, .dropline, .ssinputs');
+    const t = holder && holder.querySelector('.tot');
+    if (t) t.textContent = totText(st, ex, input.dataset.f.startsWith('d'));
+  }
+
   /** Una serie = fila principal + (si el ejercicio es drop set) una segunda línea
    *  "↳" con el peso menor y las reps que se hacen enseguida, sin pausa. */
   function setRow(st, j, ex) {
     const drop = ex.drop ? `
       <div class="dropline">
         <span class="arrow" title="Drop set: sin pausa, con menos peso">↳</span>
-        <div class="stepper">
-          <button data-act="dw-" aria-label="Menos peso del drop">−</button>
-          <input inputmode="decimal" data-f="dweight" value="${fmt(st.drop && st.drop.weight)}" placeholder="drop kg" aria-label="Peso del drop">
-          <button data-act="dw+" aria-label="Más peso del drop">+</button>
-        </div>
+        ${weightField(st, ex, true, 'Peso del drop')}
         <input class="reps" inputmode="numeric" data-f="dreps" value="${st.drop && st.drop.reps != null ? st.drop.reps : ''}" placeholder="reps" aria-label="Repeticiones del drop">
         <span></span><span></span>
+        ${totCaption(st, ex, true)}
       </div>` : '';
     return `
     <div class="setw" data-set="${j}">
       <div class="set ${st.done ? 'done' : ''}">
         <span class="n">${j + 1}</span>
-        <div class="stepper">
-          <button data-act="w-" aria-label="Menos peso">−</button>
-          <input inputmode="decimal" data-f="weight" value="${fmt(st.weight)}" placeholder="0" aria-label="Peso">
-          <button data-act="w+" aria-label="Más peso">+</button>
-        </div>
+        ${weightField(st, ex, false, 'Peso')}
         <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones">
         <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
         <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+        ${totCaption(st, ex, false)}
       </div>${drop}
     </div>`;
   }
@@ -411,13 +442,17 @@
     </section>`;
   }
 
+  /** Resumen de un ejercicio en el editor: "4×5 · 60 kg · barra 20". */
+  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.bar != null ? ' · barra ' + fmt(e.bar) : ''}`;
+  const BAR_CHIPS = [['', 'Sin barra'], ['20', '20 kg'], ['17.5', '17,5 kg']];
+
   function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
     return `
     <details class="exe ${rev ? 'revisar-box' : ''}" data-id="${esc(e.id)}" ${ui.open.has(e.id) ? 'open' : ''}>
       <summary>
         <span><b data-sum="name">${esc(e.name)}</b>
-          <span class="muted" data-sum="info">${e.sets}×${esc(e.reps)}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}</span>
+          <span class="muted" data-sum="info">${esc(exInfo(e))}</span>
           ${inSuperset ? '<span class="badge">Superserie</span>' : ''}
           ${rev ? '<span class="badge warn">REVISAR</span>' : ''}</span>
       </summary>
@@ -429,6 +464,11 @@
           <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
           <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
+        <label>Barra: cargás los discos por lado y la app suma el total</label>
+        <div class="chips">
+          ${BAR_CHIPS.map(([v, l]) => `<button class="chip ${String(e.bar ?? '') === v ? 'on' : ''}" data-act="set-bar" data-bar="${v}">${l}</button>`).join('')}
+        </div>
+        <input data-rf="bar" inputmode="decimal" value="${fmt(e.bar)}" placeholder="Otra barra: sus kg (0 si no sabés el peso)" aria-label="Peso de la barra">
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
         ${e.original ? `<div class="original">Original del PDF: ${esc(e.original)}</div>` : ''}
@@ -622,24 +662,20 @@
     switch (act) {
       /* --- entrenar --- */
       case 'start': S.startSession(btn.dataset.day); render(); window.scrollTo(0, 0); break;
-      case 'w-': case 'w+': {
+      case 'w-': case 'w+': case 'dw-': case 'dw+': {
         const input = btn.parentElement.querySelector('input');
+        const f = input.dataset.f;                         // weight | side | dweight | dside
+        const perSide = f.endsWith('side');
+        const step = perSide ? 1.25 : 2.5;                 // por lado: 1,25 (= 2,5 al total)
         const cur = S.parseNum(input.value);
-        const base = Number.isNaN(cur) || cur == null ? 0 : cur;
-        const next = Math.max(0, Math.round((base + (act === 'w+' ? 2.5 : -2.5)) * 100) / 100);
+        let base = Number.isNaN(cur) ? null : cur;
+        if (base == null) {
+          // Drop vacío: se parte del peso de la serie principal; si no, de 0.
+          base = f.startsWith('d') ? (perSide ? S.sideOf(c.st, c.ex.bar) : c.st.weight) || 0 : 0;
+        }
+        const next = Math.max(0, Math.round((base + (act.endsWith('+') ? step : -step)) * 100) / 100);
         input.value = fmt(next); input.classList.remove('invalid');
-        c.st.weight = next; S.commit();
-        break;
-      }
-      case 'dw-': case 'dw+': {
-        const input = btn.parentElement.querySelector('input');
-        const cur = S.parseNum(input.value);
-        // Si el drop está vacío, se parte del peso de la serie principal.
-        const base = Number.isNaN(cur) || cur == null ? (c.st.weight || 0) : cur;
-        const next = Math.max(0, Math.round((base + (act === 'dw+' ? 2.5 : -2.5)) * 100) / 100);
-        input.value = fmt(next); input.classList.remove('invalid');
-        c.st.drop = c.st.drop || S.blankDrop(c.ex.target && c.ex.target.reps);
-        c.st.drop.weight = next; S.commit();
+        setWeight(c.st, c.ex, f, next); S.commit(); updateTot(input, c.st, c.ex);
         break;
       }
       case 'toggle-drop':
@@ -671,7 +707,7 @@
         c.exs.forEach((e) => {
           const prev = e.sets[e.sets.length - 1];
           e.sets.push({
-            weight: prev ? prev.weight : null, reps: prev ? prev.reps : null,
+            weight: prev ? prev.weight : null, side: prev ? prev.side ?? null : null, reps: prev ? prev.reps : null,
             drop: e.drop ? (prev && prev.drop ? Object.assign({}, prev.drop) : S.blankDrop(e.target && e.target.reps)) : null,
             note: '', done: false,
           });
@@ -717,6 +753,13 @@
       case 'del-day': {
         const d = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
+        break;
+      }
+      case 'set-bar': {
+        const id = btn.closest('[data-id]').dataset.id;
+        const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
+        ex.bar = btn.dataset.bar === '' ? null : Number(btn.dataset.bar);
+        S.commit(); ui.open.add(id); render();
         break;
       }
       case 'toggle-ss': {
@@ -785,28 +828,36 @@
     const el = e.target;
 
     // Sesión: peso / reps de una serie
-    if (el.dataset.f === 'weight' || el.dataset.f === 'reps') {
+    if (['weight', 'side', 'dweight', 'dside'].includes(el.dataset.f)) {
+      const { st, ex } = ctx(el);
+      if (!st) return;
+      const v = S.parseNum(el.value);
+      el.classList.toggle('invalid', Number.isNaN(v));
+      if (Number.isNaN(v)) return;                 // no guarda valores inválidos
+      setWeight(st, ex, el.dataset.f, v); S.commit(); updateTot(el, st, ex);
+      return;
+    }
+    if (el.dataset.f === 'reps') {
       const { st } = ctx(el);
       if (!st) return;
       let v = S.parseNum(el.value);
-      if (el.dataset.f === 'reps' && !Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
+      if (!Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
-      if (Number.isNaN(v)) return;                 // no guarda valores inválidos
-      st[el.dataset.f] = v; S.commit();
+      if (Number.isNaN(v)) return;
+      st.reps = v; S.commit();
       return;
     }
 
     // Sesión: peso / reps de la parte drop de una serie
-    if (el.dataset.f === 'dweight' || el.dataset.f === 'dreps') {
+    if (el.dataset.f === 'dreps') {
       const { st, ex } = ctx(el);
       if (!st) return;
-      const key = el.dataset.f === 'dweight' ? 'weight' : 'reps';
       let v = S.parseNum(el.value);
-      if (key === 'reps' && !Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
+      if (!Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;
       st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps);
-      st.drop[key] = v; S.commit();
+      st.drop.reps = v; S.commit();
       return;
     }
 
@@ -829,6 +880,13 @@
       else if (f === 'sets') { const n = Number(el.value); ok = Number.isInteger(n) && n >= 1 && n <= 20; if (ok) ex.sets = n; }
       else if (f === 'reps') { ex.reps = el.value; }
       else if (f === 'targetWeight') { const v = S.parseNum(el.value); ok = !Number.isNaN(v); if (ok) ex.targetWeight = v; }
+      else if (f === 'bar') {
+        const v = S.parseNum(el.value); ok = !Number.isNaN(v);
+        if (ok) {
+          ex.bar = v;
+          box.querySelectorAll('[data-act="set-bar"]').forEach((b) => b.classList.toggle('on', b.dataset.bar === String(ex.bar ?? '')));
+        }
+      }
       else if (f === 'notes') {
         ex.notes = el.value;
         const rev = isRevisar(ex.notes);
@@ -838,8 +896,7 @@
       if (ok) {
         S.commit();
         box.querySelector('[data-sum="name"]').textContent = ex.name;
-        box.querySelector('[data-sum="info"]').textContent =
-          `${ex.sets}×${ex.reps}${ex.targetWeight != null ? ' · ' + fmt(ex.targetWeight) + ' ' + unit() : ''}`;
+        box.querySelector('[data-sum="info"]').textContent = exInfo(ex);
       }
     }
   });
@@ -861,10 +918,13 @@
     }
     if (el.classList.contains('invalid')) {
       toast('Valor no válido: se restauró el anterior');
-      const { st } = ctx(el);
-      if (st && ['weight', 'reps', 'dweight', 'dreps'].includes(el.dataset.f)) {
+      const { st, ex } = ctx(el);
+      if (st && ['weight', 'side', 'reps', 'dweight', 'dside', 'dreps'].includes(el.dataset.f)) {
         const d = st.drop || {};
-        el.value = { weight: fmt(st.weight), reps: st.reps ?? '', dweight: fmt(d.weight), dreps: d.reps ?? '' }[el.dataset.f];
+        el.value = {
+          weight: fmt(st.weight), side: fmt(S.sideOf(st, ex.bar)), reps: st.reps ?? '',
+          dweight: fmt(d.weight), dside: fmt(S.sideOf(d, ex.bar)), dreps: d.reps ?? '',
+        }[el.dataset.f];
         el.classList.remove('invalid');
       } else render();
     }

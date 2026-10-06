@@ -329,3 +329,14 @@ input[type="date"] {
 }
 input[type="date"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
 input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
+
+/* ---------- barra: discos por lado + total calculado ---------- */
+.tot {
+  grid-column: 2; text-align: center; font-size: .75rem; font-weight: 600;
+  color: var(--accent); margin-top: -2px; font-variant-numeric: tabular-nums; letter-spacing: .01em;
+}
+.ssinputs .tot { grid-column: 1; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.chip { min-height: 40px; padding: 0 14px; border-radius: 99px; font-size: .9375rem; background: var(--card); }
+.chip.on { background: var(--accent); color: var(--accent-text); }
+.chip.on:active { background: var(--accent); }
