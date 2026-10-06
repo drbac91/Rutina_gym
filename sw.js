@@ -6,7 +6,7 @@
    IMPORTANTE: solo toca los archivos de la app y los scripts de las librerías
    (Chart.js y Firebase). El tráfico de datos y de login de Firebase pasa
    directo, sin caché: si no, se rompería la sincronización. */
-const CACHE = 'gym-v2';
+const CACHE = 'gym-v3';
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
@@ -22,7 +22,8 @@ const FILES = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE).then(async (c) => {
-      await c.addAll(FILES);
+      // cache:'reload' = pedir siempre a la red (GitHub Pages guarda los archivos ~10 min).
+      await Promise.all(FILES.map((f) => c.add(new Request(f, { cache: 'reload' }))));
       // Las librerías son opcionales: si no hay red ahora, se cachean en el primer uso.
       for (const url of LIBS) {
         try { await c.add(new Request(url, { mode: 'no-cors' })); } catch (err) { /* nada */ }
@@ -47,7 +48,9 @@ self.addEventListener('fetch', (e) => {
 
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((cached) => {
-      const network = fetch(e.request).then((res) => {
+      // Archivos propios: se revalida contra la red ignorando el caché HTTP.
+      const req = own ? new Request(e.request.url, { cache: 'no-cache' }) : e.request;
+      const network = fetch(req).then((res) => {
         if (res && (res.ok || res.type === 'opaque')) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(e.request, copy));
