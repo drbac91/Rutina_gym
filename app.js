@@ -11,6 +11,7 @@
     tab: 'train',
     editId: null,        // id de una sesión ya terminada que se está editando
     open: new Set(),     // ejercicios del editor que están desplegados
+    pasteOpen: false,    // caja para pegar el JSON de una rutina
     progKey: null,       // ejercicio elegido en Progreso
     chart: null,
   };
@@ -409,10 +410,37 @@
         <button class="block" data-act="export-csv">⬇ Exportar historial (CSV)</button>
       </div>
       <div class="card stack">
+        <h2>Cambiar la rutina</h2>
+        <p class="muted">Reemplaza solo los días y ejercicios. <b>Tu historial no se toca.</b> Antes de aplicar te muestra un resumen y se guarda la rutina anterior para poder deshacer.</p>
+        <button class="primary block" data-act="import-routine-file">⬆ Importar rutina (archivo JSON)</button>
+        <input type="file" id="file-routine" accept="application/json,.json" hidden>
+        <button class="block" data-act="toggle-paste">${ui.pasteOpen ? 'Cancelar' : '📋 Importar rutina pegando texto'}</button>
+        ${ui.pasteOpen ? `
+          <textarea id="paste-json" rows="8" placeholder='Pegá acá el JSON de la rutina' spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+          <button class="primary block" data-act="apply-paste">Aplicar rutina pegada</button>` : ''}
+        ${S.hasRoutineBackup() ? '<button class="block" data-act="undo-routine">↩ Deshacer última importación de rutina</button>' : ''}
+      </div>
+      <div class="card stack">
         <h2>Rutina original</h2>
         <p class="muted">Vuelve a cargar la rutina de rutina.json. No toca el historial.</p>
         <button class="block danger" data-act="reset-routine">Restaurar rutina original</button>
       </div>`;
+  }
+
+  /** Importa solo la rutina desde un texto JSON, con resumen y confirmación. */
+  function applyRoutineText(text) {
+    try {
+      const routine = S.parseRoutineImport(text);
+      const nEx = routine.days.reduce((n, d) => n + d.exercises.length, 0);
+      const resumen = routine.days.map((d) => `• ${d.name}: ${d.exercises.length} ejercicios`).join('\n');
+      if (!confirm(`Vas a REEMPLAZAR tu rutina actual por esta:\n\n${resumen}\n\nTotal: ${nEx} ejercicios.\nTu historial NO se modifica y podés deshacer desde Datos.\n\n¿Continuar?`)) return;
+      S.replaceRoutine(routine);
+      ui.pasteOpen = false;
+      toast('Rutina actualizada ✓ — revisá las notas marcadas');
+      go('routine');
+    } catch (err) {
+      alert('No se pudo importar la rutina: ' + err.message);
+    }
   }
 
   async function importFile(file) {
@@ -591,6 +619,14 @@
       case 'export-json': download(`rutina-gym-backup-${S.todayStr()}.json`, S.exportJSON(), 'application/json'); toast('Backup descargado'); break;
       case 'export-csv': download(`historial-gym-${S.todayStr()}.csv`, S.exportCSV(), 'text/csv;charset=utf-8'); toast('CSV descargado'); break;
       case 'import-json': document.getElementById('file').click(); break;
+      case 'import-routine-file': document.getElementById('file-routine').click(); break;
+      case 'toggle-paste': ui.pasteOpen = !ui.pasteOpen; render(); break;
+      case 'apply-paste': applyRoutineText(document.getElementById('paste-json').value); break;
+      case 'undo-routine':
+        if (confirm('¿Volver a la rutina que tenías antes de la última importación? El historial no se modifica.')) {
+          if (S.restoreRoutineBackup()) { toast('Rutina anterior restaurada'); go('routine'); } else alert('No hay rutina anterior guardada.');
+        }
+        break;
       case 'reset-routine':
         if (confirm('¿Reemplazar tu rutina actual por la original de rutina.json? El historial se conserva.')) {
           try { await S.resetRoutine(); toast('Rutina restaurada'); render(); } catch (err) { alert(err.message); }
@@ -659,6 +695,11 @@
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; render(); return; }
     if (el.id === 'file') { importFile(el.files[0]); el.value = ''; return; }
+    if (el.id === 'file-routine') {
+      const f = el.files[0]; el.value = '';
+      if (f) f.text().then(applyRoutineText);
+      return;
+    }
     if (el.classList.contains('invalid')) {
       toast('Valor no válido: se restauró el anterior');
       const { st } = ctx(el);
