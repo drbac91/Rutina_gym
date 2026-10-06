@@ -340,3 +340,14 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .chip { min-height: 40px; padding: 0 14px; border-radius: 99px; font-size: .9375rem; background: var(--card); }
 .chip.on { background: var(--accent); color: var(--accent-text); }
 .chip.on:active { background: var(--accent); }
+
+/* ---------- selector de barra en Entrenar ---------- */
+.barpick { margin: 4px 0 12px; }
+.barlabel { display: block; font-size: .8125rem; color: var(--muted); margin: 0 0 6px 2px; }
+.barpick .chips { align-items: center; margin: 0; }
+.barpick .chip { background: var(--fill); }
+.barpick .chip.on { background: var(--accent); color: var(--accent-text); }
+.barother { width: 104px; min-height: 40px; padding: 6px 12px; border-radius: 99px; font-size: 1rem; text-align: center; }
+.barother.on { border-color: var(--accent); }
+.barpick.need .barlabel { color: var(--warn); font-weight: 600; }
+.barpick.need .barlabel::after { content: " · elegila antes de marcar"; font-weight: 400; }
