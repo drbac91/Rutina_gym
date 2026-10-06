@@ -51,6 +51,7 @@
     e = e || {};
     const sets = parseInt(e.sets, 10);
     const tw = e.targetWeight == null ? null : Number(e.targetWeight);
+    const bar = e.bar == null || e.bar === '' ? null : Number(e.bar);
     return {
       id: e.id ? String(e.id) : uid(),
       name: String(e.name || '').trim() || 'Ejercicio',
@@ -60,6 +61,7 @@
       notes: String(e.notes || ''),
       original: String(e.original || ''),
       group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
+      bar: Number.isFinite(bar) && bar >= 0 ? bar : null,   // kg de la barra; null = no se carga por lado
     };
   }
 
@@ -67,9 +69,10 @@
     s = s || {};
     const num = (v) => { const n = v == null ? null : Number(v); return Number.isFinite(n) && n >= 0 ? n : null; };
     // "drop": segunda parte de la MISMA serie, sin pausa, con menos peso (ej.: 10×20 kg + 10×15 kg).
-    const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps) } : null;
+    const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps), side: num(s.drop.side) } : null;
     return {
-      weight: num(s.weight),
+      weight: num(s.weight),            // SIEMPRE el total (barra + discos): historial y gráficos usan esto
+      side: num(s.side),                // discos por lado, solo en ejercicios con barra
       reps: num(s.reps),
       drop: drop && (drop.weight != null || drop.reps != null) ? drop : null,
       note: String(s.note || ''),
@@ -123,6 +126,7 @@
           done: !!(ex && ex.done),
           drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
           group: String((ex && ex.group) || ''),   // superserie (misma marca en ejercicios consecutivos)
+          bar: ex && ex.bar != null && Number.isFinite(Number(ex.bar)) ? Number(ex.bar) : null,   // barra usada
           target: {
             sets: Number(t.sets) || 0,
             reps: t.reps == null ? '' : String(t.reps),
@@ -231,6 +235,19 @@
     commit();
   }
 
+  /* ---------- barra: discos por lado ↔ total ---------- */
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  /** Total = barra + 2 × discos por lado. */
+  const barTotal = (bar, side) => (side == null ? null : round2((bar || 0) + 2 * side));
+  /** Discos por lado de una serie: el guardado o, si falta (datos viejos), deducido del total. */
+  function sideOf(st, bar) {
+    if (!st) return null;
+    if (st.side != null) return st.side;
+    if (st.weight == null || bar == null) return null;
+    return st.weight >= bar ? round2((st.weight - bar) / 2) : null;
+  }
+
   /* ---------- rutina: ejercicios ---------- */
 
   /** Vincula / desvincula un ejercicio con el SIGUIENTE como superserie. */
@@ -324,14 +341,25 @@
         const drop = !group && isDropExercise(ex);
         for (let i = 0; i < nSets; i++) {
           const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
-          sets.push({
+          const set = {
             weight: src ? src.weight : ex.targetWeight,
+            side: null,
             reps: src ? src.reps : firstInt(ex.reps),
             drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
             note: '', done: false,
-          });
+          };
+          if (ex.bar != null) {
+            // Con barra se recuerdan los DISCOS por lado; el total se recalcula con la barra actual.
+            set.side = sideOf(src || { weight: ex.targetWeight }, ex.bar);
+            set.weight = set.side != null ? barTotal(ex.bar, set.side) : set.weight;
+            if (set.drop) {
+              set.drop.side = sideOf(set.drop, ex.bar);
+              if (set.drop.side != null) set.drop.weight = barTotal(ex.bar, set.drop.side);
+            }
+          }
+          sets.push(set);
         }
-        return { name: ex.name, done: false, drop, group,
+        return { name: ex.name, done: false, drop, group, bar: ex.bar,
                  target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
@@ -520,7 +548,7 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
-    isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset,
+    isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
