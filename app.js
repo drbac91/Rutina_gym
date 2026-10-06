@@ -122,7 +122,8 @@
         <div class="ex-head"><h3>${esc(ex.name)}</h3><span class="target">${targetText(ex)}</span></div>
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
-        <div class="set-head"><span>#</span><span>${ex.bar != null ? unit() + ' por lado' : unit()}</span><span>reps</span><span></span><span></span></div>
+        ${barPicker(ex, i)}
+        <div class="set-head"><span>#</span><span>${ex.usesBar ? unit() + ' por lado' : unit()}</span><span>reps</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
@@ -145,7 +146,7 @@
         if (!st) return '';
         return `
           <div class="ssline" data-ex="${i}">
-            <span class="ssname">${esc(s.exercises[i].name)}${s.exercises[i].bar != null ? ' · discos por lado' : ''}</span>
+            <span class="ssname">${esc(s.exercises[i].name)}${s.exercises[i].usesBar ? ' · discos por lado' : ''}</span>
             <div class="ssinputs">
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
@@ -171,6 +172,7 @@
         <div class="ex-head"><h3>Superserie</h3><span class="target">${exs.map(targetText).join(' + ')}</span></div>
         ${notes}
         ${prevs}
+        ${idxs.map((i) => barPicker(s.exercises[i], i, s.exercises[i].name)).join('')}
         ${rows.join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
@@ -212,13 +214,14 @@
 
   /** Texto del total bajo el campo: "= 60 kg" (o el peso de la barra si todavía está vacío). */
   function totText(st, ex, isDrop) {
+    if (ex.bar == null) return 'elegí la barra ↑';
     const w = isDrop ? (st.drop && st.drop.weight) : st.weight;
     return w != null ? `= ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
   }
 
   /** Campo de peso con sus botones −/+. Con barra se cargan los discos POR LADO. */
   function weightField(st, ex, isDrop, aria) {
-    const perSide = ex.bar != null;
+    const perSide = !!ex.usesBar;
     const src = isDrop ? (st.drop || {}) : st;
     const f = (isDrop ? 'd' : '') + (perSide ? 'side' : 'weight');
     const val = perSide ? S.sideOf(src, ex.bar) : src.weight;
@@ -230,7 +233,7 @@
           <button data-act="${isDrop ? 'dw+' : 'w+'}" aria-label="Más peso">+</button>
         </div>`;
   }
-  const totCaption = (st, ex, isDrop) => (ex.bar != null ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
+  const totCaption = (st, ex, isDrop) => (ex.usesBar ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
 
   /** Guarda un peso tecleado. Con barra: discos por lado → total = barra + 2 × lado. */
   function setWeight(st, ex, f, v) {
@@ -246,6 +249,21 @@
     const holder = input.closest('.set, .dropline, .ssinputs');
     const t = holder && holder.querySelector('.tot');
     if (t) t.textContent = totText(st, ex, input.dataset.f.startsWith('d'));
+  }
+
+  /** Selector de la barra que te tocó hoy: 20 · 17,5 · las que ya usaste · otra. */
+  function barPicker(ex, i, label) {
+    if (!ex.usesBar) return '';
+    const opts = [...new Set([20, 17.5, ...S.barsUsed(ex.name)])].sort((a, b) => b - a);
+    const other = ex.bar != null && !opts.includes(ex.bar) ? fmt(ex.bar) : '';
+    return `
+      <div class="barpick ${ex.bar == null ? 'need' : ''}" data-ex="${i}">
+        <span class="barlabel">${label ? esc(label) + ' · ' : ''}Barra de hoy</span>
+        <div class="chips">
+          ${opts.map((b) => `<button class="chip ${ex.bar === b ? 'on' : ''}" data-act="pick-bar" data-bar="${b}">${fmt(b)} kg</button>`).join('')}
+          <input class="barother ${other ? 'on' : ''}" data-f="bar" inputmode="decimal" value="${other}" placeholder="otra kg" aria-label="Peso de otra barra">
+        </div>
+      </div>`;
   }
 
   /** Una serie = fila principal + (si el ejercicio es drop set) una segunda línea
@@ -317,7 +335,7 @@
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
-        return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}</div>` : '';
+        return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}</div>` : '';
       }).join('');
       return `
       <article class="card" data-sid="${esc(s.id)}">
@@ -443,8 +461,7 @@
   }
 
   /** Resumen de un ejercicio en el editor: "4×5 · 60 kg · barra 20". */
-  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.bar != null ? ' · barra ' + fmt(e.bar) : ''}`;
-  const BAR_CHIPS = [['', 'Sin barra'], ['20', '20 kg'], ['17.5', '17,5 kg']];
+  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : ''}`;
 
   function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
@@ -464,11 +481,11 @@
           <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
           <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
-        <label>Barra: cargás los discos por lado y la app suma el total</label>
+        <label>¿Lleva barra? (al entrenar cargás discos por lado y elegís qué barra te tocó)</label>
         <div class="chips">
-          ${BAR_CHIPS.map(([v, l]) => `<button class="chip ${String(e.bar ?? '') === v ? 'on' : ''}" data-act="set-bar" data-bar="${v}">${l}</button>`).join('')}
+          <button class="chip ${e.usesBar ? '' : 'on'}" data-act="set-usesbar" data-v="0">Sin barra</button>
+          <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-usesbar" data-v="1">Con barra</button>
         </div>
-        <input data-rf="bar" inputmode="decimal" value="${fmt(e.bar)}" placeholder="Otra barra: sus kg (0 si no sabés el peso)" aria-label="Peso de la barra">
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
         ${e.original ? `<div class="original">Original del PDF: ${esc(e.original)}</div>` : ''}
@@ -678,6 +695,9 @@
         setWeight(c.st, c.ex, f, next); S.commit(); updateTot(input, c.st, c.ex);
         break;
       }
+      case 'pick-bar':
+        S.setSessionBar(c.ex, Number(btn.dataset.bar)); render();
+        break;
       case 'toggle-drop':
         c.ex.drop = !c.ex.drop;
         c.ex.sets.forEach((st) => {
@@ -689,6 +709,7 @@
         // Una serie (o la serie completa de una superserie): todos los ejercicios del grupo a la vez.
         const sts = c.exs.map((e) => e.sets[c.j]).filter(Boolean);
         const turnOn = !sts.every((x) => x.done);
+        if (turnOn && c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Elegí qué barra usaste'); break; }
         if (turnOn && !sts.every(setValid)) { toast('Cargá las repeticiones primero'); break; }
         sts.forEach((x) => { x.done = turnOn; });
         c.exs.forEach(syncEx); S.commit(); refreshCard(c.card, c.exs);
@@ -719,6 +740,7 @@
         if (c.exs.every((e) => e.done)) {
           c.exs.forEach((e) => { e.sets.forEach((st) => { st.done = false; }); e.done = false; });
         } else {
+          if (c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Elegí qué barra usaste'); break; }
           let skipped = 0;
           c.exs.forEach((e) => { e.sets.forEach((st) => { if (setValid(st)) st.done = true; else skipped++; }); syncEx(e); });
           if (skipped) toast(`${skipped} serie(s) sin reps quedaron sin marcar`);
@@ -755,10 +777,10 @@
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
         break;
       }
-      case 'set-bar': {
+      case 'set-usesbar': {
         const id = btn.closest('[data-id]').dataset.id;
         const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
-        ex.bar = btn.dataset.bar === '' ? null : Number(btn.dataset.bar);
+        ex.usesBar = btn.dataset.v === '1';
         S.commit(); ui.open.add(id); render();
         break;
       }
@@ -837,6 +859,11 @@
       setWeight(st, ex, el.dataset.f, v); S.commit(); updateTot(el, st, ex);
       return;
     }
+    if (el.dataset.f === 'bar') {                  // "otra" barra: se aplica al salir del campo
+      const v = S.parseNum(el.value);
+      el.classList.toggle('invalid', Number.isNaN(v));
+      return;
+    }
     if (el.dataset.f === 'reps') {
       const { st } = ctx(el);
       if (!st) return;
@@ -880,13 +907,7 @@
       else if (f === 'sets') { const n = Number(el.value); ok = Number.isInteger(n) && n >= 1 && n <= 20; if (ok) ex.sets = n; }
       else if (f === 'reps') { ex.reps = el.value; }
       else if (f === 'targetWeight') { const v = S.parseNum(el.value); ok = !Number.isNaN(v); if (ok) ex.targetWeight = v; }
-      else if (f === 'bar') {
-        const v = S.parseNum(el.value); ok = !Number.isNaN(v);
-        if (ok) {
-          ex.bar = v;
-          box.querySelectorAll('[data-act="set-bar"]').forEach((b) => b.classList.toggle('on', b.dataset.bar === String(ex.bar ?? '')));
-        }
-      }
+
       else if (f === 'notes') {
         ex.notes = el.value;
         const rev = isRevisar(ex.notes);
@@ -910,6 +931,14 @@
       return;
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; render(); return; }
+    if (el.dataset.f === 'bar') {
+      const { ex } = ctx(el);
+      const v = S.parseNum(el.value);
+      if (ex && v != null && !Number.isNaN(v)) S.setSessionBar(ex, v);
+      else if (Number.isNaN(v)) toast('Peso de barra no válido');
+      render();
+      return;
+    }
     if (el.id === 'file') { importFile(el.files[0]); el.value = ''; return; }
     if (el.id === 'file-routine') {
       const f = el.files[0]; el.value = '';

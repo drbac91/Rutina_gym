@@ -51,7 +51,6 @@
     e = e || {};
     const sets = parseInt(e.sets, 10);
     const tw = e.targetWeight == null ? null : Number(e.targetWeight);
-    const bar = e.bar == null || e.bar === '' ? null : Number(e.bar);
     return {
       id: e.id ? String(e.id) : uid(),
       name: String(e.name || '').trim() || 'Ejercicio',
@@ -61,7 +60,7 @@
       notes: String(e.notes || ''),
       original: String(e.original || ''),
       group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
-      bar: Number.isFinite(bar) && bar >= 0 ? bar : null,   // kg de la barra; null = no se carga por lado
+      usesBar: !!e.usesBar || (e.bar != null && e.bar !== ''),   // lleva barra: se cargan discos por lado
     };
   }
 
@@ -126,7 +125,8 @@
           done: !!(ex && ex.done),
           drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
           group: String((ex && ex.group) || ''),   // superserie (misma marca en ejercicios consecutivos)
-          bar: ex && ex.bar != null && Number.isFinite(Number(ex.bar)) ? Number(ex.bar) : null,   // barra usada
+          usesBar: !!(ex && (ex.usesBar || ex.bar != null)),
+          bar: ex && ex.bar != null && Number.isFinite(Number(ex.bar)) ? Number(ex.bar) : null,   // barra elegida ese día (kg)
           target: {
             sets: Number(t.sets) || 0,
             reps: t.reps == null ? '' : String(t.reps),
@@ -239,13 +239,38 @@
 
   const round2 = (n) => Math.round(n * 100) / 100;
   /** Total = barra + 2 × discos por lado. */
-  const barTotal = (bar, side) => (side == null ? null : round2((bar || 0) + 2 * side));
+  const barTotal = (bar, side) => (side == null || bar == null ? null : round2(bar + 2 * side));
   /** Discos por lado de una serie: el guardado o, si falta (datos viejos), deducido del total. */
   function sideOf(st, bar) {
     if (!st) return null;
     if (st.side != null) return st.side;
     if (st.weight == null || bar == null) return null;
     return st.weight >= bar ? round2((st.weight - bar) / 2) : null;
+  }
+
+  /** Cambia la barra de un ejercicio en la sesión: se conservan los discos por lado
+   *  y se recalculan los totales (también los del drop). */
+  function setSessionBar(ex, bar) {
+    const old = ex.bar;
+    ex.bar = bar;
+    ex.sets.forEach((st) => {
+      st.side = sideOf(st, old);
+      if (st.side != null) st.weight = barTotal(bar, st.side);
+      if (st.drop) {
+        st.drop.side = sideOf(st.drop, old);
+        if (st.drop.side != null) st.drop.weight = barTotal(bar, st.drop.side);
+      }
+    });
+    commit();
+  }
+
+  /** Barras (kg) ya usadas en un ejercicio, para ofrecerlas como botones. */
+  function barsUsed(name) {
+    const key = normName(name), out = new Set();
+    state.sessions.forEach((s) => s.exercises.forEach((ex) => {
+      if (ex.bar != null && normName(ex.name) === key) out.add(ex.bar);
+    }));
+    return [...out];
   }
 
   /* ---------- rutina: ejercicios ---------- */
@@ -308,7 +333,7 @@
           if (normName(ex.name) !== key) continue;
           const done = ex.sets.filter((st) => st.done);
           if (done.length) {
-            return { date: s.date, dayId: s.dayId, dayName: s.dayName,
+            return { date: s.date, dayId: s.dayId, dayName: s.dayName, bar: ex.bar != null ? ex.bar : null,
                      sets: done.map((st) => Object.assign({}, st, { drop: st.drop ? Object.assign({}, st.drop) : null })) };
           }
         }
@@ -339,6 +364,7 @@
         const group = run.length > 1 ? ex.group : '';
         const nSets = run.length > 1 ? Math.max(...run.map((k) => day.exercises[k].sets)) : ex.sets;
         const drop = !group && isDropExercise(ex);
+        const lastBar = ex.usesBar && last && last.bar != null ? last.bar : null;
         for (let i = 0; i < nSets; i++) {
           const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
           const set = {
@@ -348,18 +374,19 @@
             drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
             note: '', done: false,
           };
-          if (ex.bar != null) {
-            // Con barra se recuerdan los DISCOS por lado; el total se recalcula con la barra actual.
-            set.side = sideOf(src || { weight: ex.targetWeight }, ex.bar);
-            set.weight = set.side != null ? barTotal(ex.bar, set.side) : set.weight;
+          if (ex.usesBar) {
+            // Con barra se recuerdan los DISCOS por lado. La barra arranca con la última usada
+            // en este ejercicio (se cambia al entrenar); sin barra conocida, el total queda pendiente.
+            set.side = src ? sideOf(src, lastBar) : null;
+            set.weight = set.side != null ? barTotal(lastBar, set.side) : (src ? null : ex.targetWeight);
             if (set.drop) {
-              set.drop.side = sideOf(set.drop, ex.bar);
-              if (set.drop.side != null) set.drop.weight = barTotal(ex.bar, set.drop.side);
+              set.drop.side = sideOf(set.drop, lastBar);
+              if (set.drop.side != null) set.drop.weight = barTotal(lastBar, set.drop.side);
             }
           }
           sets.push(set);
         }
-        return { name: ex.name, done: false, drop, group, bar: ex.bar,
+        return { name: ex.name, done: false, drop, group, usesBar: !!ex.usesBar, bar: lastBar,
                  target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
@@ -548,7 +575,7 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
-    isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf,
+    isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
