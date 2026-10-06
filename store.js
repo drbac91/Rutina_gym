@@ -59,6 +59,7 @@
       targetWeight: Number.isFinite(tw) && tw >= 0 ? tw : null,
       notes: String(e.notes || ''),
       original: String(e.original || ''),
+      group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
     };
   }
 
@@ -90,6 +91,18 @@
   }
 
   /** Volumen de una serie (peso × reps, más la parte drop si la tiene). */
+  /** Superseries: rachas de ejercicios CONSECUTIVOS con la misma marca "group".
+   *  Devuelve listas de índices; una racha de 1 es un ejercicio normal. */
+  function groupRuns(list) {
+    const runs = [];
+    list.forEach((e, i) => {
+      const last = runs[runs.length - 1];
+      if (e.group && last && list[last[last.length - 1]].group === e.group) last.push(i);
+      else runs.push([i]);
+    });
+    return runs;
+  }
+
   const setVolume = (st) => (st.weight || 0) * (st.reps || 0) + (st.drop ? (st.drop.weight || 0) * (st.drop.reps || 0) : 0);
 
   function normSession(s) {
@@ -109,6 +122,7 @@
           name: String((ex && ex.name) || 'Ejercicio'),
           done: !!(ex && ex.done),
           drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
+          group: String((ex && ex.group) || ''),   // superserie (misma marca en ejercicios consecutivos)
           target: {
             sets: Number(t.sets) || 0,
             reps: t.reps == null ? '' : String(t.reps),
@@ -219,6 +233,26 @@
 
   /* ---------- rutina: ejercicios ---------- */
 
+  /** Vincula / desvincula un ejercicio con el SIGUIENTE como superserie. */
+  function toggleSuperset(dayId, exId) {
+    const day = find(state.routine.days, dayId);
+    if (!day) return;
+    const list = day.exercises;
+    const i = list.findIndex((e) => e.id === exId);
+    if (i < 0 || i >= list.length - 1) return;
+    const runs = groupRuns(list);
+    const run = (k) => runs.find((r) => r.includes(k));
+    if (list[i].group && list[i].group === list[i + 1].group) {
+      // Desvincular: se corta la racha entre i e i+1 (cada parte con 2+ ejercicios sigue siendo superserie).
+      const left = run(i).filter((k) => k <= i), right = run(i).filter((k) => k > i);
+      [left, right].forEach((part) => { const g = part.length >= 2 ? uid() : ''; part.forEach((k) => { list[k].group = g; }); });
+    } else {
+      const g = list[i].group || list[i + 1].group || uid();
+      [...run(i), ...run(i + 1)].forEach((k) => { list[k].group = g; });
+    }
+    commit();
+  }
+
   function addExercise(dayId) {
     const day = find(state.routine.days, dayId);
     if (!day) return null;
@@ -276,14 +310,19 @@
   function startSession(dayId) {
     const day = find(state.routine.days, dayId);
     if (!day) return null;
+    const runs = groupRuns(day.exercises);
     const session = {
       id: uid(), created: Date.now(), date: todayStr(),
       dayId: day.id, dayName: day.name, finished: false,
-      exercises: day.exercises.map((ex) => {
+      exercises: day.exercises.map((ex, idx) => {
         const last = lastEntry(ex.name, null, day.id);
         const sets = [];
-        const drop = isDropExercise(ex);
-        for (let i = 0; i < ex.sets; i++) {
+        // Superserie: los ejercicios de la racha comparten número de series (el mayor) y no usan drop.
+        const run = runs.find((r) => r.includes(idx));
+        const group = run.length > 1 ? ex.group : '';
+        const nSets = run.length > 1 ? Math.max(...run.map((k) => day.exercises[k].sets)) : ex.sets;
+        const drop = !group && isDropExercise(ex);
+        for (let i = 0; i < nSets; i++) {
           const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
           sets.push({
             weight: src ? src.weight : ex.targetWeight,
@@ -292,8 +331,8 @@
             note: '', done: false,
           });
         }
-        return { name: ex.name, done: false, drop,
-                 target: { sets: ex.sets, reps: ex.reps, weight: ex.targetWeight }, sets };
+        return { name: ex.name, done: false, drop, group,
+                 target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
     state.sessions.push(session);
@@ -481,7 +520,7 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
-    isDropExercise, blankDrop, setVolume,
+    isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,

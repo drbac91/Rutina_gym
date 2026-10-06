@@ -102,21 +102,26 @@
       </button>`).join('');
   }
 
-  function trainSession(s) {
-    const editing = !!ui.editId;
-    const exCards = s.exercises.map((ex, i) => {
-      const last = S.lastEntry(ex.name, s.id, s.dayId);
-      const otherDay = last && last.dayId !== s.dayId && last.dayName ? ' · ' + esc(last.dayName) : '';
-      const prev = last
-        ? `Última vez (${fmtShort(last.date)}${otherDay}): ` + last.sets.map(fmtSet).join(' · ')
-        : 'Sin registros previos';
-      const t = ex.target || {};
-      const target = `${t.sets || ex.sets.length}×${esc(t.reps)}${t.weight != null ? ' · ' + fmt(t.weight) + ' ' + unit() : ''}`;
-      return `
+  /** Texto "Última vez (fecha · otro día): series" de un ejercicio. */
+  function prevText(s, ex) {
+    const last = S.lastEntry(ex.name, s.id, s.dayId);
+    if (!last) return 'Sin registros previos';
+    const otherDay = last.dayId !== s.dayId && last.dayName ? ' · ' + esc(last.dayName) : '';
+    return `Última vez (${fmtShort(last.date)}${otherDay}): ` + last.sets.map(fmtSet).join(' · ');
+  }
+
+  const targetText = (ex) => {
+    const t = ex.target || {};
+    return `${t.sets || ex.sets.length}×${esc(t.reps)}${t.weight != null ? ' · ' + fmt(t.weight) + ' ' + unit() : ''}`;
+  };
+
+  /** Tarjeta de un ejercicio normal. */
+  function exerciseCard(s, ex, i) {
+    return `
       <section class="card ex ${ex.done ? 'done' : ''}" data-ex="${i}">
-        <div class="ex-head"><h3>${esc(ex.name)}</h3><span class="target">${target}</span></div>
+        <div class="ex-head"><h3>${esc(ex.name)}</h3><span class="target">${targetText(ex)}</span></div>
         ${exerciseNote(s, i)}
-        <p class="prev">${prev}</p>
+        <p class="prev">${prevText(s, ex)}</p>
         <div class="set-head"><span>#</span><span>${unit()}</span><span>reps</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
@@ -125,7 +130,62 @@
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
       </section>`;
-    }).join('');
+  }
+
+  /** Tarjeta de superserie: 2+ ejercicios que se alternan. Cada serie lleva una línea por
+   *  ejercicio (con su peso y reps) y UN solo tilde para la serie completa. */
+  function supersetCard(s, idxs) {
+    const exs = idxs.map((i) => s.exercises[i]);
+    const allDone = exs.every((e) => e.done);
+    const nSets = Math.max(...exs.map((e) => e.sets.length));
+    const rows = [];
+    for (let j = 0; j < nSets; j++) {
+      const lines = idxs.map((i) => {
+        const st = s.exercises[i].sets[j];
+        if (!st) return '';
+        return `
+          <div class="ssline" data-ex="${i}">
+            <span class="ssname">${esc(s.exercises[i].name)}</span>
+            <div class="ssinputs">
+              <div class="stepper">
+                <button data-act="w-" aria-label="Menos peso">−</button>
+                <input inputmode="decimal" data-f="weight" value="${fmt(st.weight)}" placeholder="0" aria-label="Peso de ${esc(s.exercises[i].name)}">
+                <button data-act="w+" aria-label="Más peso">+</button>
+              </div>
+              <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
+            </div>
+          </div>`;
+      }).join('');
+      const done = exs.every((e) => e.sets[j] && e.sets[j].done);
+      rows.push(`
+        <div class="setw" data-set="${j}">
+          <div class="ssset ${done ? 'done' : ''}">
+            <span class="n">${j + 1}</span>
+            <div class="sslines">${lines}</div>
+            <button class="chk" data-act="toggle-set" aria-label="Serie completa hecha">✓</button>
+            <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+          </div>
+        </div>`);
+    }
+    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('');
+    const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
+    return `
+      <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
+        <div class="ex-head"><h3>Superserie</h3><span class="target">${exs.map(targetText).join(' + ')}</span></div>
+        ${notes}
+        ${prevs}
+        ${rows.join('')}
+        <div class="row" style="margin-top:8px">
+          <button data-act="add-set">+ Serie</button>
+          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Deshacer' : '✓ Completar'}</button>
+        </div>
+      </section>`;
+  }
+
+  function trainSession(s) {
+    const editing = !!ui.editId;
+    const exCards = S.groupRuns(s.exercises).map((idxs) =>
+      idxs.length > 1 ? supersetCard(s, idxs) : exerciseCard(s, s.exercises[idxs[0]], idxs[0])).join('');
 
     return `
       <h1>${esc(s.dayName || 'Sesión')} ${editing ? '<span class="badge">editando</span>' : ''}</h1>
@@ -143,12 +203,12 @@
   }
 
   /** Notas del ejercicio de la rutina (si existe una con el mismo nombre). */
-  function exerciseNote(s, i) {
+  function exerciseNote(s, i, withName) {
     const name = S.normName(s.exercises[i].name);
     const day = S.state.routine.days.find((d) => d.id === s.dayId);
     const re = day && day.exercises.find((e) => S.normName(e.name) === name);
     if (!re || !re.notes) return '';
-    return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${esc(re.notes)}</div>`;
+    return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
 
   /** Una serie = fila principal + (si el ejercicio es drop set) una segunda línea
@@ -181,13 +241,19 @@
     </div>`;
   }
 
-  /** Actualiza solo las clases de una fila/tarjeta, sin redibujar (no pierde el foco). */
-  function refreshDone(card, ex) {
-    card.classList.toggle('done', ex.done);
-    card.querySelectorAll('.set').forEach((row, j) => row.classList.toggle('done', !!ex.sets[j].done));
+  /** Actualiza solo las clases de una tarjeta (ejercicio o superserie), sin redibujar
+   *  (así no se pierde el foco ni el teclado). */
+  function refreshCard(card, exs) {
+    const all = exs.every((e) => e.done);
+    card.classList.toggle('done', all);
+    card.querySelectorAll('.setw').forEach((w, j) => {
+      const done = exs.every((e) => e.sets[j] && e.sets[j].done);
+      const row = w.querySelector('.set, .ssset');
+      if (row) row.classList.toggle('done', done);
+    });
     const btn = card.querySelector('[data-act="complete-ex"]');
-    btn.textContent = ex.done ? 'Deshacer' : '✓ Completar';
-    btn.classList.toggle('ok', !ex.done);
+    btn.textContent = all ? 'Deshacer' : '✓ Completar';
+    btn.classList.toggle('ok', !all);
   }
 
   function finishSession() {
@@ -336,18 +402,23 @@
         <button class="fixed icon" data-act="day-down" ${di === n - 1 ? 'disabled' : ''} aria-label="Bajar día">↓</button>
         <button class="fixed icon danger" data-act="del-day" aria-label="Borrar día">🗑</button>
       </div>
-      ${d.exercises.map((e, ei) => exerciseEditor(e, ei, d.exercises.length)).join('')}
+      ${(() => {
+        const inSS = new Set(S.groupRuns(d.exercises).filter((r) => r.length > 1).flat());
+        return d.exercises.map((e, ei) => exerciseEditor(e, ei, d.exercises.length, inSS.has(ei),
+          ei < d.exercises.length - 1 && !!e.group && d.exercises[ei + 1].group === e.group)).join('');
+      })()}
       <button class="block" style="margin-top:8px" data-act="add-ex">+ Agregar ejercicio</button>
     </section>`;
   }
 
-  function exerciseEditor(e, ei, n) {
+  function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
     return `
     <details class="exe ${rev ? 'revisar-box' : ''}" data-id="${esc(e.id)}" ${ui.open.has(e.id) ? 'open' : ''}>
       <summary>
         <span><b data-sum="name">${esc(e.name)}</b>
           <span class="muted" data-sum="info">${e.sets}×${esc(e.reps)}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}</span>
+          ${inSuperset ? '<span class="badge">Superserie</span>' : ''}
           ${rev ? '<span class="badge warn">REVISAR</span>' : ''}</span>
       </summary>
       <div class="body">
@@ -361,6 +432,7 @@
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
         ${e.original ? `<div class="original">Original del PDF: ${esc(e.original)}</div>` : ''}
+        ${ei < n - 1 ? `<button class="block" style="margin-top:10px" data-act="toggle-ss">${linkedNext ? '⛓ Quitar superserie con el siguiente' : '⛓ Hacer superserie con el siguiente'}</button>` : ''}
         <div class="row" style="margin-top:10px">
           <button data-act="ex-up" ${ei === 0 ? 'disabled' : ''}>↑ Subir</button>
           <button data-act="ex-down" ${ei === n - 1 ? 'disabled' : ''}>↓ Bajar</button>
@@ -525,11 +597,15 @@
   /** Datos de la serie/ejercicio bajo el elemento clickeado (pestaña Entrenar). */
   function ctx(el) {
     const s = currentSession();
-    const card = el.closest('[data-ex]');
+    const card = el.closest('.ex');                 // tarjeta (puede agrupar varios ejercicios: superserie)
+    const exEl = el.closest('[data-ex]');           // el ejercicio exacto (en superseries, cada línea)
     const row = el.closest('[data-set]');
-    const ex = s && card ? s.exercises[+card.dataset.ex] : null;
+    const g = card && card.dataset.group;
+    const idxs = card ? (g ? g.split(',').map(Number) : [+card.dataset.ex]) : [];
+    const ex = s && exEl ? s.exercises[+exEl.dataset.ex] : null;
     const st = ex && row ? ex.sets[+row.dataset.set] : null;
-    return { s, card, row, ex, st, j: row ? +row.dataset.set : -1 };
+    const exs = s ? idxs.map((i) => s.exercises[i]) : [];
+    return { s, card, row, ex, st, j: row ? +row.dataset.set : -1, idxs, exs };
   }
 
   document.getElementById('tabs').addEventListener('click', (e) => {
@@ -573,40 +649,48 @@
         });
         S.commit(); render();
         break;
-      case 'toggle-set':
-        if (!c.st.done && !setValid(c.st)) { toast('Cargá las repeticiones primero'); break; }
-        c.st.done = !c.st.done; syncEx(c.ex); S.commit(); refreshDone(c.card, c.ex);
-        if (c.st.done) {                                   // pulso en el tilde, en el mismo instante
+      case 'toggle-set': {
+        // Una serie (o la serie completa de una superserie): todos los ejercicios del grupo a la vez.
+        const sts = c.exs.map((e) => e.sets[c.j]).filter(Boolean);
+        const turnOn = !sts.every((x) => x.done);
+        if (turnOn && !sts.every(setValid)) { toast('Cargá las repeticiones primero'); break; }
+        sts.forEach((x) => { x.done = turnOn; });
+        c.exs.forEach(syncEx); S.commit(); refreshCard(c.card, c.exs);
+        if (turnOn) {                                      // pulso en el tilde, en el mismo instante
           const chk = c.row.querySelector('.chk');
           chk.classList.remove('pop'); void chk.offsetWidth; chk.classList.add('pop');
           haptic(12);
         }
         break;
-      case 'del-set':
-        c.ex.sets.splice(c.j, 1); syncEx(c.ex); S.commit(); render();
-        break;
-      case 'add-set': {
-        const prev = c.ex.sets[c.ex.sets.length - 1];
-        c.ex.sets.push({
-          weight: prev ? prev.weight : null, reps: prev ? prev.reps : null,
-          drop: c.ex.drop ? (prev && prev.drop ? Object.assign({}, prev.drop) : S.blankDrop(c.ex.target && c.ex.target.reps)) : null,
-          note: '', done: false,
-        });
-        c.ex.done = false; S.commit(); render();
-        break;
       }
-      case 'complete-ex':
-        if (c.ex.done) {
-          c.ex.sets.forEach((st) => { st.done = false; }); c.ex.done = false;
+      case 'del-set':
+        c.exs.forEach((e) => { e.sets.splice(c.j, 1); syncEx(e); });
+        S.commit(); render();
+        break;
+      case 'add-set':
+        c.exs.forEach((e) => {
+          const prev = e.sets[e.sets.length - 1];
+          e.sets.push({
+            weight: prev ? prev.weight : null, reps: prev ? prev.reps : null,
+            drop: e.drop ? (prev && prev.drop ? Object.assign({}, prev.drop) : S.blankDrop(e.target && e.target.reps)) : null,
+            note: '', done: false,
+          });
+          e.done = false;
+        });
+        S.commit(); render();
+        break;
+      case 'complete-ex': {
+        if (c.exs.every((e) => e.done)) {
+          c.exs.forEach((e) => { e.sets.forEach((st) => { st.done = false; }); e.done = false; });
         } else {
           let skipped = 0;
-          c.ex.sets.forEach((st) => { if (setValid(st)) st.done = true; else skipped++; });
-          syncEx(c.ex);
+          c.exs.forEach((e) => { e.sets.forEach((st) => { if (setValid(st)) st.done = true; else skipped++; }); syncEx(e); });
           if (skipped) toast(`${skipped} serie(s) sin reps quedaron sin marcar`);
         }
-        S.commit(); refreshDone(c.card, c.ex);
-        if (c.ex.done) haptic(18);
+        S.commit(); refreshCard(c.card, c.exs);
+        if (c.exs.every((e) => e.done)) haptic(18);
         break;
+      }
       case 'finish': finishSession(); break;
       case 'discard':
         if (confirm('¿Descartar esta sesión? Se pierde lo cargado.')) { S.deleteSession(c.s.id); toast('Sesión descartada'); render(); }
@@ -633,6 +717,12 @@
       case 'del-day': {
         const d = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
+        break;
+      }
+      case 'toggle-ss': {
+        const id = btn.closest('[data-id]').dataset.id;
+        S.toggleSuperset(btn.closest('[data-day]').dataset.day, id);
+        ui.open.add(id); render();
         break;
       }
       case 'add-ex': {
