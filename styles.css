@@ -351,3 +351,20 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .barother.on { border-color: var(--accent); }
 .barpick.need .barlabel { color: var(--warn); font-weight: 600; }
 .barpick.need .barlabel::after { content: " · elegila antes de marcar"; font-weight: 400; }
+
+/* ---------- comentarios persistentes por ejercicio ---------- */
+.comment { margin-top: 10px; }
+.comment label { margin-top: 4px; }
+.comment textarea { min-height: 60px; font-size: 1rem; }
+
+/* ---------- ciclos y gráficos generales (SVG propio) ---------- */
+.stats.two { grid-template-columns: 1fr 1fr; margin-top: 8px; }
+.svgchart { width: 100%; margin-top: 12px; overflow: hidden; }
+.svgchart svg { display: block; max-width: 100%; }
+.svgchart .ax { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.svgchart .ax.acc { fill: var(--accent); }
+.svgchart .lg { font-size: 11px; fill: var(--text); }
+.svgchart .bar { fill: var(--muted); fill-opacity: .4; }
+.svgchart .ln { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.svgchart .pt { fill: var(--accent); }
+.chart-empty { background: var(--fill); border-radius: 12px; padding: 14px; margin-top: 12px; text-align: center; }

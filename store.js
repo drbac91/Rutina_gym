@@ -19,6 +19,11 @@
   const BACKUP_KEY = 'gymapp.v1.backup';   // copia previa a importar/restaurar
   let state = null;
 
+  /** Barras disponibles en el gimnasio (kg), en el orden en que se ofrecen en "Barra de hoy". */
+  const BARS = [25, 20, 17.5, 7.5];
+  /** Peso de cada ladrillo de las máquinas (kg). */
+  const BRICK_KG = 5;
+
   /* ---------- utilidades ---------- */
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -49,6 +54,7 @@
 
   function normExercise(e) {
     e = e || {};
+    const usesBar = !!e.usesBar || (e.bar != null && e.bar !== '');
     const sets = parseInt(e.sets, 10);
     const tw = e.targetWeight == null ? null : Number(e.targetWeight);
     return {
@@ -60,7 +66,8 @@
       notes: String(e.notes || ''),
       original: String(e.original || ''),
       group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
-      usesBar: !!e.usesBar || (e.bar != null && e.bar !== ''),   // lleva barra: se cargan discos por lado
+      usesBar,                                // lleva barra: se cargan discos por lado
+      usesBricks: !usesBar && !!e.usesBricks,  // máquina con ladrillos (excluyente con barra)
     };
   }
 
@@ -68,10 +75,11 @@
     s = s || {};
     const num = (v) => { const n = v == null ? null : Number(v); return Number.isFinite(n) && n >= 0 ? n : null; };
     // "drop": segunda parte de la MISMA serie, sin pausa, con menos peso (ej.: 10×20 kg + 10×15 kg).
-    const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps), side: num(s.drop.side) } : null;
+    const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps), side: num(s.drop.side), bricks: num(s.drop.bricks) } : null;
     return {
       weight: num(s.weight),            // SIEMPRE el total (barra + discos): historial y gráficos usan esto
       side: num(s.side),                // discos por lado, solo en ejercicios con barra
+      bricks: num(s.bricks),            // ladrillos, solo en máquinas con ladrillos (weight = bricks × 5)
       reps: num(s.reps),
       drop: drop && (drop.weight != null || drop.reps != null) ? drop : null,
       note: String(s.note || ''),
@@ -126,6 +134,7 @@
           drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
           group: String((ex && ex.group) || ''),   // superserie (misma marca en ejercicios consecutivos)
           usesBar: !!(ex && (ex.usesBar || ex.bar != null)),
+          usesBricks: !!(ex && ex.usesBricks) && !(ex.usesBar || ex.bar != null),
           bar: ex && ex.bar != null && Number.isFinite(Number(ex.bar)) ? Number(ex.bar) : null,   // barra elegida ese día (kg)
           target: {
             sets: Number(t.sets) || 0,
@@ -138,6 +147,18 @@
     };
   }
 
+  /** Limpia el mapa de comentarios: claves normalizadas, sin textos vacíos. */
+  function normComments(c) {
+    const out = {};
+    if (c && typeof c === 'object' && !Array.isArray(c)) {
+      Object.keys(c).forEach((k) => {
+        const v = String(c[k] == null ? '' : c[k]).trim();
+        if (v && normName(k)) out[normName(k)] = v.slice(0, 2000);
+      });
+    }
+    return out;
+  }
+
   /** Valida y limpia un objeto con formato rutina.json. Lanza Error en español. */
   function normalize(d) {
     if (!d || typeof d !== 'object') throw new Error('El archivo no es un JSON de rutina válido.');
@@ -147,6 +168,9 @@
       version: 1,
       weightUnit: d.weightUnit || 'kg',
       routineUpdatedAt: Number(d.routineUpdatedAt) || 0,   // marca de tiempo para la sincronización
+      // Comentarios por ejercicio para próximas sesiones: { nombreNormalizado: texto }.
+      // Viven FUERA de routine.days, así "Importar solo la rutina" no los borra.
+      exerciseComments: normComments(d.exerciseComments),
       routine: {
         days: days.map((day, i) => ({
           id: String((day && day.id) || uid()),
@@ -246,6 +270,17 @@
     if (st.side != null) return st.side;
     if (st.weight == null || bar == null) return null;
     return st.weight >= bar ? round2((st.weight - bar) / 2) : null;
+  }
+
+  /* ---------- ladrillos: cantidad ↔ total ---------- */
+
+  /** Total de una máquina con ladrillos: ladrillos × 5 kg. */
+  const bricksTotal = (bricks) => (bricks == null ? null : round2(bricks * BRICK_KG));
+  /** Ladrillos de una serie: los guardados o, si faltan (datos viejos), deducidos del total. */
+  function bricksOf(st) {
+    if (!st) return null;
+    if (st.bricks != null) return st.bricks;
+    return st.weight != null ? round2(st.weight / BRICK_KG) : null;
   }
 
   /** Cambia la barra de un ejercicio en la sesión: se conservan los discos por lado
@@ -383,10 +418,19 @@
               set.drop.side = sideOf(set.drop, lastBar);
               if (set.drop.side != null) set.drop.weight = barTotal(lastBar, set.drop.side);
             }
+          } else if (ex.usesBricks) {
+            // Máquina con ladrillos: se recuerdan los LADRILLOS de la última sesión; total = ladrillos × 5.
+            set.bricks = src ? bricksOf(src) : (ex.targetWeight != null ? round2(ex.targetWeight / BRICK_KG) : null);
+            set.weight = bricksTotal(set.bricks);
+            if (set.drop) {
+              set.drop.bricks = bricksOf(set.drop);
+              if (set.drop.bricks != null) set.drop.weight = bricksTotal(set.drop.bricks);
+            }
           }
           sets.push(set);
         }
         return { name: ex.name, done: false, drop, group, usesBar: !!ex.usesBar, bar: lastBar,
+                 usesBricks: !!ex.usesBricks && !ex.usesBar,
                  target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
@@ -452,6 +496,57 @@
     return { points, best };
   }
 
+  /* ---------- comentarios por ejercicio ---------- */
+
+  /** Comentario guardado para un ejercicio (por nombre normalizado, igual que el historial). */
+  const getExerciseComment = (name) => (state.exerciseComments || {})[normName(name)] || '';
+
+  /** Guarda (o borra, si queda vacío) el comentario de un ejercicio. Devuelve true si cambió. */
+  function setExerciseComment(name, text) {
+    const key = normName(name);
+    if (!key) return false;
+    const v = String(text == null ? '' : text).trim().slice(0, 2000);
+    const c = state.exerciseComments || (state.exerciseComments = {});
+    if ((c[key] || '') === v) return false;
+    if (v) c[key] = v; else delete c[key];
+    commit();                                            // se sincroniza junto con la rutina
+    return true;
+  }
+
+  /* ---------- volumen por sesión, por día y por ciclo ---------- */
+
+  /** Volumen total de una sesión: Σ peso × reps de las series hechas (incluye la parte drop). */
+  const sessionVolume = (s) => s.exercises.reduce((a, ex) =>
+    a + ex.sets.filter((st) => st.done).reduce((b, st) => b + setVolume(st), 0), 0);
+
+  /** Sesiones terminadas de un día de rutina, en orden: [{ date, volume }]. */
+  const dayVolumes = (dayId) => sortedSessions()
+    .filter((s) => s.finished && s.dayId === dayId)
+    .map((s) => ({ date: s.date, volume: round2(sessionVolume(s)) }));
+
+  /** Ciclos completos: recorre las sesiones terminadas en orden y acumula los días distintos
+   *  de la rutina ACTUAL; cuando están todos, cuenta 1 ciclo y reinicia el acumulado.
+   *  El volumen del ciclo suma todas las sesiones hechas en ese tramo. */
+  function cycles() {
+    const dayIds = state.routine.days.map((d) => d.id);
+    const total = dayIds.length;
+    const list = [];
+    if (!total) return { complete: 0, current: 0, total: 0, list };
+    let acc = new Set(), tramo = [];
+    sortedSessions().forEach((s) => {
+      if (!s.finished) return;
+      tramo.push(s);
+      if (dayIds.includes(s.dayId)) acc.add(s.dayId);
+      if (acc.size === total) {
+        const volume = round2(tramo.reduce((a, x) => a + sessionVolume(x), 0));
+        list.push({ n: list.length + 1, start: tramo[0].date, end: s.date,
+                    sessions: tramo.length, volume, avg: round2(volume / tramo.length) });
+        acc = new Set(); tramo = [];
+      }
+    });
+    return { complete: list.length, current: acc.size, total, list };
+  }
+
   /* ---------- exportar / importar ---------- */
 
   const exportJSON = () => JSON.stringify(state, null, 2);
@@ -479,9 +574,10 @@
   /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
 
   /** Reemplaza la rutina con la de la nube, sin disparar una nueva subida. */
-  function setRoutine(routine, weightUnit, updatedAt) {
+  function setRoutine(routine, weightUnit, updatedAt, comments) {
     state.routine = normalize({ routine }).routine;
     if (weightUnit) state.weightUnit = weightUnit;
+    if (comments !== undefined) state.exerciseComments = normComments(comments);   // si no vienen, se conservan
     state.routineUpdatedAt = Number(updatedAt) || 0;
     commit(true);
   }
@@ -575,7 +671,9 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
+    BARS, BRICK_KG,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
+    bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,

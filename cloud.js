@@ -53,7 +53,15 @@
     for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
     return (h >>> 0).toString(36) + str.length.toString(36);
   }
-  const routineHash = () => hash(JSON.stringify({ routine: S.state.routine, weightUnit: S.state.weightUnit }));
+  /** Huella del documento de rutina. Los comentarios por ejercicio entran SOLO si hay alguno:
+   *  así, para quien no tiene comentarios la huella es idéntica a la de versiones anteriores
+   *  y un dispositivo recién actualizado no cree que su rutina cambió (y no pisa la de la nube). */
+  const routineHash = () => {
+    const doc = { routine: S.state.routine, weightUnit: S.state.weightUnit };
+    const c = S.state.exerciseComments;
+    if (c && Object.keys(c).length) doc.exerciseComments = c;
+    return hash(JSON.stringify(doc));
+  };
   const sessionHash = (s) => { const { updatedAt, ...rest } = s; return hash(JSON.stringify(rest)); };
   /** Firma de una rutina ignorando los ids (para detectar la rutina de fábrica). */
   const sig = (r) => JSON.stringify(r.days.map((d) => [d.name, d.exercises.map((e) => [e.name, e.sets, e.reps, e.targetWeight, e.notes])])).normalize('NFC');
@@ -270,7 +278,7 @@
       if (take) S.backup();
     }
     if (!take) return false;
-    S.setRoutine(data.routine, data.weightUnit, data.updatedAt);
+    S.setRoutine(data.routine, data.weightUnit, data.updatedAt, data.exerciseComments);   // sin el campo, se conservan los locales
     pushed.routine = routineHash();
     savePushed();
     return true;
@@ -318,7 +326,8 @@
     if (pushed.routine !== rh) {
       st.routineUpdatedAt = now;
       ops.push({ key: 'routine', hash: rh, ref: routineRef(),
-                 data: { routine: st.routine, weightUnit: st.weightUnit, updatedAt: now } });
+                 data: { routine: st.routine, weightUnit: st.weightUnit, updatedAt: now,
+                         exerciseComments: st.exerciseComments || {} } });
     }
     const seen = new Set();
     st.sessions.forEach((s) => {

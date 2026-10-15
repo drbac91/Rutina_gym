@@ -13,6 +13,7 @@
     open: new Set(),     // ejercicios del editor que están desplegados
     pasteOpen: false,    // caja para pegar el JSON de una rutina
     progKey: null,       // ejercicio elegido en Progreso
+    progDay: null,       // día elegido en el gráfico de volumen por día
     chart: null,
   };
 
@@ -123,13 +124,14 @@
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
-        <div class="set-head"><span>#</span><span>${ex.usesBar ? unit() + ' por lado' : unit()}</span><span>reps</span><span></span><span></span></div>
+        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
           <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Deshacer' : '✓ Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
+        ${commentBox(ex)}
       </section>`;
   }
 
@@ -146,7 +148,7 @@
         if (!st) return '';
         return `
           <div class="ssline" data-ex="${i}">
-            <span class="ssname">${esc(s.exercises[i].name)}${s.exercises[i].usesBar ? ' · discos por lado' : ''}</span>
+            <span class="ssname">${esc(s.exercises[i].name)}${{ bar: ' · discos por lado', bricks: ' · ladrillos', plain: '' }[loadMode(s.exercises[i])]}</span>
             <div class="ssinputs">
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
@@ -178,6 +180,7 @@
           <button data-act="add-set">+ Serie</button>
           <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Deshacer' : '✓ Completar'}</button>
         </div>
+        ${exs.map((e) => commentBox(e, true)).join('')}
       </section>`;
   }
 
@@ -210,51 +213,64 @@
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
 
-  /* ---------- peso: directo, o por lado si el ejercicio usa barra ---------- */
+  /* ---------- peso: directo, por lado (barra) o en ladrillos (máquina) ---------- */
 
-  /** Texto del total bajo el campo: "= 60 kg" (o el peso de la barra si todavía está vacío). */
+  /** Cómo se carga el peso de un ejercicio: 'bar' (discos por lado), 'bricks' (ladrillos) o 'plain'. */
+  const loadMode = (ex) => (ex.usesBar ? 'bar' : ex.usesBricks ? 'bricks' : 'plain');
+  /** Campo del modelo según el modo: el total siempre queda en "weight". */
+  const LOAD_KEY = { bar: 'side', bricks: 'bricks', plain: 'weight' };
+
+  /** Texto bajo el campo: "= 60 kg" (o qué falta para calcularlo). */
   function totText(st, ex, isDrop) {
-    if (ex.bar == null) return 'elegí la barra ↑';
     const w = isDrop ? (st.drop && st.drop.weight) : st.weight;
+    if (loadMode(ex) === 'bricks') return w != null ? `= ${fmt(w)} ${unit()}` : `${fmt(S.BRICK_KG)} ${unit()} c/ladrillo`;
+    if (ex.bar == null) return 'elegí la barra ↑';
     return w != null ? `= ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
   }
 
-  /** Campo de peso con sus botones −/+. Con barra se cargan los discos POR LADO. */
+  /** Campo de peso con sus botones −/+. Con barra: discos POR LADO; con ladrillos: cantidad de LADRILLOS. */
   function weightField(st, ex, isDrop, aria) {
-    const perSide = !!ex.usesBar;
+    const mode = loadMode(ex);
     const src = isDrop ? (st.drop || {}) : st;
-    const f = (isDrop ? 'd' : '') + (perSide ? 'side' : 'weight');
-    const val = perSide ? S.sideOf(src, ex.bar) : src.weight;
-    const ph = perSide ? 'x lado' : (isDrop ? 'drop kg' : '0');
+    const f = (isDrop ? 'd' : '') + LOAD_KEY[mode];
+    const val = mode === 'bar' ? S.sideOf(src, ex.bar) : mode === 'bricks' ? S.bricksOf(src) : src.weight;
+    const ph = mode === 'bar' ? 'x lado' : mode === 'bricks' ? 'ladrillos' : (isDrop ? 'drop kg' : '0');
+    const hint = mode === 'bar' ? ' (discos por lado)' : mode === 'bricks' ? ' (ladrillos)' : '';
     return `
         <div class="stepper">
           <button data-act="${isDrop ? 'dw-' : 'w-'}" aria-label="Menos peso">−</button>
-          <input inputmode="decimal" data-f="${f}" value="${fmt(val)}" placeholder="${ph}" aria-label="${aria}${perSide ? ' (discos por lado)' : ''}">
+          <input inputmode="decimal" data-f="${f}" value="${fmt(val)}" placeholder="${ph}" aria-label="${aria}${hint}">
           <button data-act="${isDrop ? 'dw+' : 'w+'}" aria-label="Más peso">+</button>
         </div>`;
   }
-  const totCaption = (st, ex, isDrop) => (ex.usesBar ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
+  const totCaption = (st, ex, isDrop) => (loadMode(ex) !== 'plain' ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
+  /** Encabezado de la columna de peso según el modo. */
+  const weightHead = (ex) => ({ bar: unit() + ' por lado', bricks: 'ladrillos', plain: unit() }[loadMode(ex)]);
 
-  /** Guarda un peso tecleado. Con barra: discos por lado → total = barra + 2 × lado. */
+  /** Guarda un peso tecleado y recalcula el total:
+   *  barra → barra + 2 × lado · ladrillos → ladrillos × 5 · directo → tal cual. */
   function setWeight(st, ex, f, v) {
-    if (f === 'weight') { st.weight = v; return; }
-    if (f === 'side') { st.side = v; st.weight = S.barTotal(ex.bar, v); return; }
-    st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps);
-    if (f === 'dweight') st.drop.weight = v;
-    else { st.drop.side = v; st.drop.weight = S.barTotal(ex.bar, v); }
+    const isDrop = f.charAt(0) === 'd';
+    const key = isDrop ? f.slice(1) : f;
+    let t = st;
+    if (isDrop) { st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps); t = st.drop; }
+    if (key === 'weight') t.weight = v;
+    else if (key === 'side') { t.side = v; t.weight = S.barTotal(ex.bar, v); }
+    else if (key === 'bricks') { t.bricks = v; t.weight = S.bricksTotal(v); }
   }
 
   /** Refresca el "= total" junto al campo, sin redibujar (no se pierde el foco). */
   function updateTot(input, st, ex) {
     const holder = input.closest('.set, .dropline, .ssinputs');
     const t = holder && holder.querySelector('.tot');
-    if (t) t.textContent = totText(st, ex, input.dataset.f.startsWith('d'));
+    if (t) t.textContent = totText(st, ex, input.dataset.f.charAt(0) === 'd');
   }
 
-  /** Selector de la barra que te tocó hoy: 20 · 17,5 · las que ya usaste · otra. */
+  /** Selector de la barra que te tocó hoy: las del gimnasio (BARS) + las ya usadas + otra. */
   function barPicker(ex, i, label) {
     if (!ex.usesBar) return '';
-    const opts = [...new Set([20, 17.5, ...S.barsUsed(ex.name)])].sort((a, b) => b - a);
+    const extra = S.barsUsed(ex.name).filter((b) => !S.BARS.includes(b)).sort((a, b) => b - a);
+    const opts = [...S.BARS, ...extra];
     const other = ex.bar != null && !opts.includes(ex.bar) ? fmt(ex.bar) : '';
     return `
       <div class="barpick ${ex.bar == null ? 'need' : ''}" data-ex="${i}">
@@ -263,6 +279,15 @@
           ${opts.map((b) => `<button class="chip ${ex.bar === b ? 'on' : ''}" data-act="pick-bar" data-bar="${b}">${fmt(b)} kg</button>`).join('')}
           <input class="barother ${other ? 'on' : ''}" data-f="bar" inputmode="decimal" value="${other}" placeholder="otra kg" aria-label="Peso de otra barra">
         </div>
+      </div>`;
+  }
+
+  /** Comentario persistente del ejercicio (independiente de las notas de la rutina). */
+  function commentBox(ex, withName) {
+    return `
+      <div class="comment">
+        <label>${withName ? esc(ex.name) + ' · ' : ''}Comentario para próximas sesiones</label>
+        <textarea data-f="comment" data-name="${esc(ex.name)}" rows="2" placeholder="Ej.: la próxima subir 2,5 kg, cuidar la bajada…">${esc(S.getExerciseComment(ex.name))}</textarea>
       </div>`;
   }
 
@@ -359,7 +384,11 @@
 
   function viewProgress() {
     const names = S.exerciseNames();
-    if (!names.length) return '<h1>Progreso</h1><p class="empty">Cuando termines tu primera sesión vas a ver acá los gráficos.</p>';
+    if (!names.length) {
+      return `<h1>Progreso</h1>${cyclesCard()}
+        <div class="card"><h2>Por ejercicio</h2><p class="muted">Cuando termines tu primera sesión vas a ver acá el gráfico de cada ejercicio.</p></div>
+        ${dayChartCard()}${cycleChartCard()}`;
+    }
     if (!names.some((n) => n.key === ui.progKey)) ui.progKey = names[0].key;
     const { points, best } = S.progress(ui.progKey);
     const last = points[points.length - 1];
@@ -378,7 +407,9 @@
 
     return `
       <h1>Progreso</h1>
+      ${cyclesCard()}
       <div class="card">
+        <h2>Por ejercicio</h2>
         <label for="p-ex">Ejercicio</label>
         <select id="p-ex" data-f="prog">${names.map((n) =>
           `<option value="${esc(n.key)}" ${n.key === ui.progKey ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>
@@ -389,7 +420,119 @@
           <div class="stat"><b>${last ? fmt(last.maxWeight) + ' ' + unit() : '–'}</b><span>Último peso</span></div>
           <div class="stat"><b class="${varCls}">${varTxt}</b><span>vs. hace 4 sem.${old ? '' : ' (sin datos)'}</span></div>
         </div>
+      </div>
+      ${dayChartCard()}
+      ${cycleChartCard()}`;
+  }
+
+  /* ---------- ciclos y gráficos generales ---------- */
+
+  /** Resumen de ciclos: un ciclo = hiciste todos los días de la rutina actual. */
+  function cyclesCard() {
+    const c = S.cycles();
+    return `
+      <div class="card">
+        <h2>Ciclos</h2>
+        <div class="stats two">
+          <div class="stat"><b>${c.complete}</b><span>Ciclos completos: ${c.complete}</span></div>
+          <div class="stat"><b>${c.current}/${c.total}</b><span>Ciclo en curso: ${c.current} de ${c.total} días</span></div>
+        </div>
+        <p class="muted">Un ciclo se completa cuando hacés todos los días de tu rutina${c.total ? ` (${c.total})` : ''}, en cualquier orden.</p>
       </div>`;
+  }
+
+  /** Gráfico de volumen por sesión de un día de la rutina. */
+  function dayChartCard() {
+    const days = S.state.routine.days;
+    if (!days.length) return '';
+    if (!days.some((d) => d.id === ui.progDay)) ui.progDay = days[0].id;
+    const pts = S.dayVolumes(ui.progDay);
+    const msg = pts.length === 0 ? 'Todavía no terminaste ninguna sesión de este día.'
+      : pts.length === 1 ? 'Hay 1 sesión de este día: con la próxima vas a ver cómo evoluciona.' : '';
+    return `
+      <div class="card">
+        <h2>Volumen por día de rutina</h2>
+        <label for="p-day">Día</label>
+        <select id="p-day" data-f="progday">${days.map((d) =>
+          `<option value="${esc(d.id)}" ${d.id === ui.progDay ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+        ${msg ? `<p class="muted chart-empty">${msg}</p>` : '<div class="svgchart" data-chart="day"></div>'}
+        <p class="muted">Volumen de cada sesión = suma de peso × reps (incluye la parte drop).</p>
+      </div>`;
+  }
+
+  /** Gráfico por ciclo completo: volumen total (barras) y promedio por sesión (línea). */
+  function cycleChartCard() {
+    const list = S.cycles().list;
+    return `
+      <div class="card">
+        <h2>Volumen por ciclo</h2>
+        ${list.length ? '<div class="svgchart" data-chart="cycle"></div>'
+          : '<p class="muted chart-empty">Todavía no completaste ningún ciclo. Cuando hagas todos los días de tu rutina vas a ver acá el volumen de cada ciclo.</p>'}
+      </div>`;
+  }
+
+  /** Número corto para ejes: 950 · 4,3k · 12k. */
+  const shortNum = (v) => (v >= 10000 ? Math.round(v / 1000) + 'k'
+    : v >= 1000 ? fmt(Math.round(v / 100) / 10) + 'k' : fmt(Math.round(v)));
+
+  /** Gráfico de barras (+ línea opcional en eje derecho) en SVG propio, al ancho exacto del contenedor.
+   *  Usa los mismos colores del gráfico por ejercicio: barras grises, línea azul. */
+  function svgChart({ labels, bars, line, barName, lineName, titles, width }) {
+    const W = Math.max(240, Math.floor(width)), H = 230;
+    const padL = 40, padR = line ? 40 : 10, padT = 30, padB = 30;
+    const iw = W - padL - padR, ih = H - padT - padB, n = labels.length;
+    const nice = (v) => {
+      if (!(v > 0)) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+      return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+    };
+    const maxB = nice(Math.max(0, ...bars)), maxL = line ? nice(Math.max(0, ...line)) : 1;
+    const x = (i) => padL + (iw * (i + 0.5)) / n;
+    const bw = Math.max(3, Math.min(34, (iw / n) * 0.62));
+    const yB = (v) => padT + ih - (v / maxB) * ih, yL = (v) => padT + ih - (v / maxL) * ih;
+    let g = '';
+    for (let k = 0; k <= 4; k++) {                       // líneas guía y escalas
+      const y = padT + (ih * k) / 4;
+      g += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" style="stroke:var(--sep)" stroke-width="1"/>`;
+      g += `<text x="${padL - 6}" y="${y + 3.5}" text-anchor="end" class="ax">${shortNum(maxB * (1 - k / 4))}</text>`;
+      if (line) g += `<text x="${W - padR + 6}" y="${y + 3.5}" class="ax acc">${shortNum(maxL * (1 - k / 4))}</text>`;
+    }
+    bars.forEach((v, i) => {
+      g += `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${yB(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(padT + ih - yB(v)).toFixed(1)}" rx="3" class="bar"><title>${esc(titles[i])}</title></rect>`;
+    });
+    if (line) {
+      g += `<path d="${line.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + yL(v).toFixed(1)).join(' ')}" class="ln"/>`;
+      line.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${yL(v).toFixed(1)}" r="4" class="pt"><title>${esc(titles[i])}</title></circle>`; });
+    }
+    const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 48))));   // etiquetas sin pisarse
+    labels.forEach((l, i) => {
+      if (i % every === 0 || i === n - 1) g += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="ax">${esc(l)}</text>`;
+    });
+    let lg = `<circle cx="${padL + 4}" cy="12" r="4" class="bar"/><text x="${padL + 12}" y="16" class="lg">${esc(barName)}</text>`;
+    if (line) lg += `<circle cx="${padL + 22 + barName.length * 6.2}" cy="12" r="4" class="pt"/><text x="${padL + 30 + barName.length * 6.2}" y="16" class="lg">${esc(lineName)}</text>`;
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(barName + (line ? ' y ' + lineName : ''))}">${lg}${g}</svg>`;
+  }
+
+  /** Dibuja los gráficos SVG de Progreso al ancho real disponible. */
+  function drawSvgCharts() {
+    document.querySelectorAll('.svgchart[data-chart]').forEach((el) => {
+      const width = el.clientWidth;
+      if (el.dataset.chart === 'day') {
+        const pts = S.dayVolumes(ui.progDay);
+        el.innerHTML = svgChart({
+          width, labels: pts.map((p) => fmtShort(p.date)), bars: pts.map((p) => p.volume),
+          barName: `Volumen de la sesión (${unit()})`,
+          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.volume)} ${unit()}`),
+        });
+      } else {
+        const list = S.cycles().list;
+        el.innerHTML = svgChart({
+          width, labels: list.map((c) => 'C' + c.n), bars: list.map((c) => c.volume), line: list.map((c) => c.avg),
+          barName: 'Volumen del ciclo', lineName: 'Promedio por sesión',
+          titles: list.map((c) => `Ciclo ${c.n} (${fmtShort(c.start)}–${fmtShort(c.end)}): ${fmt(c.volume)} ${unit()} en ${c.sessions} sesiones · promedio ${fmt(c.avg)} ${unit()}`),
+        });
+      }
+    });
   }
 
   /** Dibuja el gráfico: peso máximo (línea) y volumen (barras). */
@@ -461,7 +604,7 @@
   }
 
   /** Resumen de un ejercicio en el editor: "4×5 · 60 kg · barra 20". */
-  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : ''}`;
+  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : e.usesBricks ? ' · con ladrillos' : ''}`;
 
   function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
@@ -481,10 +624,11 @@
           <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
           <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
-        <label>¿Lleva barra? (al entrenar cargás discos por lado y elegís qué barra te tocó)</label>
+        <label>¿Cómo se carga el peso? (con barra: discos por lado · con ladrillos: cantidad × ${fmt(S.BRICK_KG)} kg)</label>
         <div class="chips">
-          <button class="chip ${e.usesBar ? '' : 'on'}" data-act="set-usesbar" data-v="0">Sin barra</button>
-          <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-usesbar" data-v="1">Con barra</button>
+          <button class="chip ${!e.usesBar && !e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="plain">Sin barra</button>
+          <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-load" data-v="bar">Con barra</button>
+          <button class="chip ${e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="bricks">Máquina con ladrillos</button>
         </div>
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
@@ -627,7 +771,7 @@
     if (gated()) { $view.innerHTML = viewLogin(); return; }
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
     $view.innerHTML = views[ui.tab]();
-    if (ui.tab === 'progress') drawChart();
+    if (ui.tab === 'progress') { drawChart(); drawSvgCharts(); }
   }
 
   /** Indicador chico arriba a la derecha con el estado de la sincronización. */
@@ -681,14 +825,17 @@
       case 'start': S.startSession(btn.dataset.day); render(); window.scrollTo(0, 0); break;
       case 'w-': case 'w+': case 'dw-': case 'dw+': {
         const input = btn.parentElement.querySelector('input');
-        const f = input.dataset.f;                         // weight | side | dweight | dside
-        const perSide = f.endsWith('side');
-        const step = perSide ? 1.25 : 2.5;                 // por lado: 1,25 (= 2,5 al total)
+        const f = input.dataset.f;                         // weight | side | bricks (con "d" adelante: drop)
+        const key = f.charAt(0) === 'd' ? f.slice(1) : f;
+        // por lado: 1,25 (= 2,5 al total) · ladrillos: 0,5 · peso directo: 2,5
+        const step = key === 'side' ? 1.25 : key === 'bricks' ? 0.5 : 2.5;
         const cur = S.parseNum(input.value);
         let base = Number.isNaN(cur) ? null : cur;
         if (base == null) {
           // Drop vacío: se parte del peso de la serie principal; si no, de 0.
-          base = f.startsWith('d') ? (perSide ? S.sideOf(c.st, c.ex.bar) : c.st.weight) || 0 : 0;
+          base = f.charAt(0) === 'd'
+            ? (key === 'side' ? S.sideOf(c.st, c.ex.bar) : key === 'bricks' ? S.bricksOf(c.st) : c.st.weight) || 0
+            : 0;
         }
         const next = Math.max(0, Math.round((base + (act.endsWith('+') ? step : -step)) * 100) / 100);
         input.value = fmt(next); input.classList.remove('invalid');
@@ -777,10 +924,11 @@
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
         break;
       }
-      case 'set-usesbar': {
+      case 'set-load': {
         const id = btn.closest('[data-id]').dataset.id;
         const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
-        ex.usesBar = btn.dataset.v === '1';
+        ex.usesBar = btn.dataset.v === 'bar';                // barra y ladrillos son excluyentes
+        ex.usesBricks = btn.dataset.v === 'bricks';
         S.commit(); ui.open.add(id); render();
         break;
       }
@@ -850,7 +998,7 @@
     const el = e.target;
 
     // Sesión: peso / reps de una serie
-    if (['weight', 'side', 'dweight', 'dside'].includes(el.dataset.f)) {
+    if (['weight', 'side', 'bricks', 'dweight', 'dside', 'dbricks'].includes(el.dataset.f)) {
       const { st, ex } = ctx(el);
       if (!st) return;
       const v = S.parseNum(el.value);
@@ -931,6 +1079,11 @@
       return;
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; render(); return; }
+    if (el.dataset.f === 'progday') { ui.progDay = el.value; render(); return; }
+    if (el.dataset.f === 'comment') {                // se guarda al salir del campo
+      if (S.setExerciseComment(el.dataset.name, el.value)) toast('Comentario guardado');
+      return;
+    }
     if (el.dataset.f === 'bar') {
       const { ex } = ctx(el);
       const v = S.parseNum(el.value);
@@ -948,11 +1101,11 @@
     if (el.classList.contains('invalid')) {
       toast('Valor no válido: se restauró el anterior');
       const { st, ex } = ctx(el);
-      if (st && ['weight', 'side', 'reps', 'dweight', 'dside', 'dreps'].includes(el.dataset.f)) {
+      if (st && ['weight', 'side', 'bricks', 'reps', 'dweight', 'dside', 'dbricks', 'dreps'].includes(el.dataset.f)) {
         const d = st.drop || {};
         el.value = {
-          weight: fmt(st.weight), side: fmt(S.sideOf(st, ex.bar)), reps: st.reps ?? '',
-          dweight: fmt(d.weight), dside: fmt(S.sideOf(d, ex.bar)), dreps: d.reps ?? '',
+          weight: fmt(st.weight), side: fmt(S.sideOf(st, ex.bar)), bricks: fmt(S.bricksOf(st)), reps: st.reps ?? '',
+          dweight: fmt(d.weight), dside: fmt(S.sideOf(d, ex.bar)), dbricks: fmt(S.bricksOf(d)), dreps: d.reps ?? '',
         }[el.dataset.f];
         el.classList.remove('invalid');
       } else render();
@@ -975,6 +1128,12 @@
   }, true);
 
   /* ---------- arranque ---------- */
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (ui.tab === 'progress' && !gated()) drawSvgCharts(); }, 200);
+  });
 
   S.onSaveError = () => toast('⚠ No se pudo guardar (almacenamiento lleno o bloqueado)');
 
