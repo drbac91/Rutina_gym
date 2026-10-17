@@ -24,6 +24,22 @@
   /** Peso de cada ladrillo de las máquinas (kg). */
   const BRICK_KG = 5;
 
+  /* ---------- umbrales de las métricas de Progreso (ajustables) ---------- */
+  /** El 1RM estimado solo se calcula con series de hasta estas repeticiones. */
+  const E1RM_MAX_REPS = 10;
+  /** Semanas sin mejorar el 1RM estimado para avisar "estancado" (3–4 es lo habitual). */
+  const STALL_WEEKS = 3;
+  /** Cuánto cuenta una serie para cada músculo SECUNDARIO (el principal cuenta 1). */
+  const SECONDARY_MUSCLE_FACTOR = 0.5;
+  /** Una serie es "efectiva" si te quedaron como mucho estas repeticiones en reserva (RIR). */
+  const EFFECTIVE_RIR_MAX = 3;
+  /** Duraciones mayores se descartan (probablemente la sesión quedó abierta). */
+  const MAX_SESSION_MINUTES = 240;
+
+  /** Grupos musculares que se pueden asignar a cada ejercicio. */
+  const MUSCLES = ['Pecho', 'Espalda', 'Hombros', 'B\u00edceps', 'Tr\u00edceps', 'Antebrazos', 'Core',
+    'Cu\u00e1driceps', 'Isquiotibiales', 'Gl\u00fateos', 'Aductores', 'Abductores', 'Pantorrillas'];
+
   /* ---------- utilidades ---------- */
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -54,10 +70,11 @@
 
   function normExercise(e) {
     e = e || {};
+    const muscles = normMuscles(e.muscles);
     const usesBar = !!e.usesBar || (e.bar != null && e.bar !== '');
     const sets = parseInt(e.sets, 10);
     const tw = e.targetWeight == null ? null : Number(e.targetWeight);
-    return {
+    return withOptional({
       id: e.id ? String(e.id) : uid(),
       name: String(e.name || '').trim() || 'Ejercicio',
       sets: sets >= 1 ? sets : 3,
@@ -68,7 +85,25 @@
       group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
       usesBar,                                // lleva barra: se cargan discos por lado
       usesBricks: !usesBar && !!e.usesBricks,  // máquina con ladrillos (excluyente con barra)
-    };
+    }, 'muscles', muscles);                   // grupos musculares (opcional)
+  }
+
+  /** Músculos de un ejercicio: { primary:[], secondary:[] } o null si no tiene.
+   *  Solo nombres de la lista MUSCLES; un músculo no puede ser principal y secundario a la vez. */
+  function normMuscles(m) {
+    if (!m || typeof m !== 'object') return null;
+    const pick = (arr) => (Array.isArray(arr) ? arr : [])
+      .map((x) => String(x).normalize('NFC')).filter((x, i, a) => MUSCLES.includes(x) && a.indexOf(x) === i);
+    const primary = pick(m.primary);
+    const secondary = pick(m.secondary).filter((x) => !primary.includes(x));
+    return primary.length || secondary.length ? { primary, secondary } : null;
+  }
+
+  /** Agrega un campo opcional SOLO si tiene valor (así los datos viejos y su huella
+   *  de sincronización no cambian). */
+  function withOptional(obj, key, value) {
+    if (value != null) obj[key] = value;
+    return obj;
   }
 
   function normSet(s) {
@@ -76,7 +111,7 @@
     const num = (v) => { const n = v == null ? null : Number(v); return Number.isFinite(n) && n >= 0 ? n : null; };
     // "drop": segunda parte de la MISMA serie, sin pausa, con menos peso (ej.: 10×20 kg + 10×15 kg).
     const drop = s.drop && typeof s.drop === 'object' ? { weight: num(s.drop.weight), reps: num(s.drop.reps), side: num(s.drop.side), bricks: num(s.drop.bricks) } : null;
-    return {
+    const out = {
       weight: num(s.weight),            // SIEMPRE el total (barra + discos): historial y gráficos usan esto
       side: num(s.side),                // discos por lado, solo en ejercicios con barra
       bricks: num(s.bricks),            // ladrillos, solo en máquinas con ladrillos (weight = bricks × 5)
@@ -85,6 +120,8 @@
       note: String(s.note || ''),
       done: s.done !== false,          // datos viejos sin "done" cuentan como hechos
     };
+    const rir = num(s.rir);
+    return withOptional(out, 'rir', rir != null && rir <= 10 ? Math.round(rir) : null);   // repeticiones en reserva (opcional)
   }
 
   /** ¿Este ejercicio de la rutina se hace con drop set? Reps tipo "10-10" (dos números
@@ -97,7 +134,7 @@
   /** Segunda parte vacía para una serie con drop: peso a completar, reps = 2º número de "10-10". */
   function blankDrop(reps) {
     const m = String(reps || '').match(/\d+/g);
-    return { weight: null, reps: m && m.length > 1 ? Number(m[1]) : (m ? Number(m[0]) : null) };
+    return { weight: null, reps: m && m.length > 1 ? Number(m[1]) : (m ? Number(m[0]) : null), side: null, bricks: null };
   }
 
   /** Volumen de una serie (peso × reps, más la parte drop si la tiene). */
@@ -117,7 +154,7 @@
 
   function normSession(s) {
     s = s || {};
-    return {
+    const out = {
       id: s.id ? String(s.id) : uid(),
       created: Number(s.created) || Date.now(),
       updatedAt: Number(s.updatedAt) || 0,                 // marca de tiempo para la sincronización
@@ -145,6 +182,9 @@
         };
       }),
     };
+    const bw = Number(s.bodyweight), fin = Number(s.finishedAt);
+    withOptional(out, 'bodyweight', Number.isFinite(bw) && bw > 0 ? bw : null);   // peso corporal ese día (opcional)
+    return withOptional(out, 'finishedAt', Number.isFinite(fin) && fin > 0 ? fin : null);   // hora de fin (opcional)
   }
 
   /** Limpia el mapa de comentarios: claves normalizadas, sin textos vacíos. */
@@ -405,6 +445,7 @@
           const set = {
             weight: src ? src.weight : ex.targetWeight,
             side: null,
+            bricks: null,                    // mismo orden de campos que normSet (ver huella de sincronización)
             reps: src ? src.reps : firstInt(ex.reps),
             drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
             note: '', done: false,
@@ -429,8 +470,8 @@
           }
           sets.push(set);
         }
-        return { name: ex.name, done: false, drop, group, usesBar: !!ex.usesBar, bar: lastBar,
-                 usesBricks: !!ex.usesBricks && !ex.usesBar,
+        return { name: ex.name, done: false, drop, group, usesBar: !!ex.usesBar,
+                 usesBricks: !!ex.usesBricks && !ex.usesBar, bar: lastBar,   // mismo orden que normSession
                  target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
       }),
     };
@@ -445,6 +486,7 @@
     if (!s) return null;
     s.exercises.forEach((ex) => { ex.sets = ex.sets.filter((st) => st.done); });
     s.exercises = s.exercises.filter((ex) => ex.sets.length > 0);
+    if (!s.finished && !s.finishedAt) s.finishedAt = Date.now();   // solo la primera vez (no al editar)
     s.finished = true;
     commit();
     return s;
@@ -545,6 +587,161 @@
       }
     });
     return { complete: list.length, current: acc.size, total, list };
+  }
+
+  /* ---------- métricas de Progreso ---------- */
+
+  /** 1RM estimado (fórmula de Epley). Solo con series de 1 a E1RM_MAX_REPS reps. */
+  function e1rm(weight, reps) {
+    if (!(weight > 0) || !(reps >= 1) || reps > E1RM_MAX_REPS) return null;
+    return reps === 1 ? weight : round2(weight * (1 + reps / 30));
+  }
+
+  /** Mejor 1RM estimado de cada sesión terminada de un ejercicio: [{ date, e1rm, weight, reps }].
+   *  Usa la parte principal de cada serie (la parte drop se hace con fatiga y no cuenta). */
+  function e1rmSeries(key) {
+    const out = [];
+    sortedSessions().forEach((s) => {
+      if (!s.finished) return;
+      let best = null;
+      s.exercises.forEach((ex) => {
+        if (normName(ex.name) !== key) return;
+        ex.sets.forEach((st) => {
+          const v = st.done ? e1rm(st.weight, st.reps) : null;
+          if (v != null && (!best || v > best.e1rm)) best = { date: s.date, e1rm: v, weight: st.weight, reps: st.reps };
+        });
+      });
+      if (best) out.push(best);
+    });
+    return out;
+  }
+
+  /** Récords de un ejercicio: mayor peso, mejor 1RM estimado y mayor volumen en una sesión. */
+  function records(key) {
+    const { points, best } = progress(key);
+    const e = e1rmSeries(key);
+    const topE = e.reduce((a, x) => (!a || x.e1rm > a.e1rm ? x : a), null);
+    const topV = points.reduce((a, x) => (!a || x.volume > a.volume ? x : a), null);
+    return { weight: best, e1rm: topE, volume: topV ? { value: round2(topV.volume), date: topV.date } : null };
+  }
+
+  /** "YYYY-MM-DD" de hace n días. */
+  function daysAgoStr(n) {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    const p = (x) => String(x).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+
+  /** Ejercicios estancados: entrenados en las últimas STALL_WEEKS semanas pero sin superar
+   *  el mejor 1RM estimado de antes. Requiere datos de antes y de después del corte. */
+  function stalls() {
+    const cut = daysAgoStr(STALL_WEEKS * 7);
+    const out = [];
+    exerciseNames().forEach(({ key, name }) => {
+      const e = e1rmSeries(key);
+      const before = e.filter((x) => x.date < cut), after = e.filter((x) => x.date >= cut);
+      if (!before.length || !after.length) return;
+      const bBefore = Math.max(...before.map((x) => x.e1rm)), bAfter = Math.max(...after.map((x) => x.e1rm));
+      if (bAfter <= bBefore) out.push({ key, name, before: bBefore, after: bAfter, sessions: after.length });
+    });
+    return out;
+  }
+
+  /** Lunes (YYYY-MM-DD) de la semana de una fecha. */
+  function weekStart(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+    const p = (x) => String(x).padStart(2, '0');
+    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+  }
+
+  /** Duración de una sesión en minutos (null si falta la hora de fin o es implausible). */
+  function sessionMinutes(s) {
+    if (!s.finishedAt || !s.created) return null;
+    const m = (s.finishedAt - s.created) / 60000;
+    return m >= 1 && m <= MAX_SESSION_MINUTES ? Math.round(m) : null;
+  }
+
+  /** Resumen por semana (de lunes a domingo): sesiones, series hechas, volumen,
+   *  series efectivas (RIR ≤ EFFECTIVE_RIR_MAX), RIR promedio y duración promedio. */
+  function weeklyStats() {
+    const map = new Map();
+    sortedSessions().forEach((s) => {
+      if (!s.finished) return;
+      const k = weekStart(s.date);
+      const w = map.get(k) || { week: k, sessions: 0, sets: 0, volume: 0, effective: 0, rirSum: 0, rirN: 0, minSum: 0, minN: 0 };
+      w.sessions++;
+      w.volume += sessionVolume(s);
+      s.exercises.forEach((ex) => ex.sets.forEach((st) => {
+        if (!st.done) return;
+        w.sets++;
+        if (st.rir != null) { w.rirN++; w.rirSum += st.rir; if (st.rir <= EFFECTIVE_RIR_MAX) w.effective++; }
+      }));
+      const mins = sessionMinutes(s);
+      if (mins != null) { w.minN++; w.minSum += mins; }
+      map.set(k, w);
+    });
+    return [...map.values()].sort((a, b) => (a.week < b.week ? -1 : 1)).map((w) => ({
+      week: w.week, sessions: w.sessions, sets: w.sets, volume: round2(w.volume), effective: w.effective,
+      rirN: w.rirN, rirAvg: w.rirN ? round2(w.rirSum / w.rirN) : null, minutesAvg: w.minN ? Math.round(w.minSum / w.minN) : null,
+    }));
+  }
+
+  /** Músculos de cada ejercicio según la rutina ACTUAL (por nombre normalizado). */
+  function muscleMap() {
+    const m = new Map();
+    state.routine.days.forEach((d) => d.exercises.forEach((e) => {
+      const k = normName(e.name);
+      if (e.muscles && !m.has(k)) m.set(k, e.muscles);
+    }));
+    return m;
+  }
+
+  /** Series por músculo en una semana: principal = 1, secundario = SECONDARY_MUSCLE_FACTOR.
+   *  Los ejercicios sin músculos asignados se suman en "unassigned". */
+  function muscleSets(week) {
+    const mm = muscleMap(), tot = new Map();
+    let unassigned = 0;
+    sortedSessions().forEach((s) => {
+      if (!s.finished || weekStart(s.date) !== week) return;
+      s.exercises.forEach((ex) => {
+        const n = ex.sets.filter((st) => st.done).length;
+        if (!n) return;
+        const mu = mm.get(normName(ex.name));
+        if (!mu) { unassigned += n; return; }
+        mu.primary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n));
+        mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
+      });
+    });
+    return { list: [...tot].map(([muscle, sets]) => ({ muscle, sets: round2(sets) })).sort((a, b) => b.sets - a.sets), unassigned };
+  }
+
+  /** Peso corporal registrado en las sesiones: [{ date, kg }] en orden. */
+  const bodyweightSeries = () => sortedSessions().filter((s) => s.bodyweight).map((s) => ({ date: s.date, kg: s.bodyweight }));
+
+  /** Último peso corporal registrado en o antes de una fecha (o el primero, si no hay antes). */
+  function bodyweightAt(date) {
+    const all = bodyweightSeries();
+    const prev = all.filter((x) => x.date <= date).pop();
+    return prev ? prev.kg : (all[0] ? all[0].kg : null);
+  }
+
+  /** Guarda el peso corporal de una sesión (vacío = se borra). Mantiene el orden de campos
+   *  de la versión normalizada para no alterar la huella de sincronización. */
+  function setSessionBodyweight(s, kg) {
+    delete s.bodyweight;
+    const fin = s.finishedAt; delete s.finishedAt;
+    if (kg != null && kg > 0) s.bodyweight = kg;
+    if (fin) s.finishedAt = fin;
+    commit();
+  }
+
+  /** Guarda el RIR de una serie (vacío = se borra). */
+  function setSetRir(st, rir) {
+    delete st.rir;
+    if (rir != null) st.rir = rir;
+    commit();
   }
 
   /* ---------- exportar / importar ---------- */
@@ -671,7 +868,9 @@
     find,
     addDay, deleteDay, moveDay,
     addExercise, deleteExercise, moveExercise,
-    BARS, BRICK_KG,
+    BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
+    e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
+    bodyweightSeries, bodyweightAt, setSessionBodyweight, setSetRir, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
     lastEntry, startSession, finishSession, deleteSession,
@@ -679,6 +878,10 @@
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
     backup, setRoutine, upsertSession, removeSession, resetToSeed,
     parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
+    /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */
+    canonSession: (x) => { const { updatedAt, ...rest } = normSession(x); return rest; },
+    canonRoutine: (r) => normalize({ routine: r }).routine,
+    normComments,
     onSaveError: null,
     onCommit: null,        // lo asigna cloud.js
   };

@@ -14,6 +14,7 @@
     pasteOpen: false,    // caja para pegar el JSON de una rutina
     progKey: null,       // ejercicio elegido en Progreso
     progDay: null,       // día elegido en el gráfico de volumen por día
+    progWeek: null,      // semana elegida en series por músculo
     chart: null,
   };
 
@@ -124,7 +125,7 @@
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
-        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps</span><span></span><span></span></div>
+        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps · RIR</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
@@ -153,6 +154,7 @@
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
               ${totCaption(st, s.exercises[i], false)}
+              <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
             </div>
           </div>`;
       }).join('');
@@ -194,6 +196,9 @@
       <div class="card">
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
+        <label for="s-bw">Peso corporal (${unit()}, opcional)</label>
+        <input id="s-bw" data-f="bodyweight" inputmode="decimal" value="${fmt(s.bodyweight)}"
+          placeholder="${S.bodyweightAt(s.date) != null ? 'último: ' + fmt(S.bodyweightAt(s.date)) : 'ej.: 78,5'}">
       </div>
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
@@ -311,6 +316,7 @@
         <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
         <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
         ${totCaption(st, ex, false)}
+        <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
       </div>${drop}
     </div>`;
   }
@@ -368,7 +374,7 @@
           <h3>${esc(s.dayName || 'Sesión')} ${s.finished ? '' : '<span class="badge warn">en curso</span>'}</h3>
           <span class="muted">${esc(fmtDate(s.date))}</span>
         </div>
-        <p class="muted">Volumen: ${fmt(vol)} ${unit()}</p>
+        <p class="muted">Volumen: ${fmt(vol)} ${unit()}${S.sessionMinutes(s) != null ? ' · ' + S.sessionMinutes(s) + ' min' : ''}${s.bodyweight ? ' · peso corporal ' + fmt(s.bodyweight) + ' ' + unit() : ''}</p>
         ${exs}
         <div class="row" style="margin-top:10px">
           <button data-act="edit-session">${s.finished ? 'Editar' : 'Continuar'}</button>
@@ -387,7 +393,7 @@
     if (!names.length) {
       return `<h1>Progreso</h1>${cyclesCard()}
         <div class="card"><h2>Por ejercicio</h2><p class="muted">Cuando termines tu primera sesión vas a ver acá el gráfico de cada ejercicio.</p></div>
-        ${dayChartCard()}${cycleChartCard()}`;
+        ${weekCard()}${muscleCard()}${stallsCard()}${bodyweightCard()}${dayChartCard()}${cycleChartCard()}`;
     }
     if (!names.some((n) => n.key === ui.progKey)) ui.progKey = names[0].key;
     const { points, best } = S.progress(ui.progKey);
@@ -420,9 +426,132 @@
           <div class="stat"><b>${last ? fmt(last.maxWeight) + ' ' + unit() : '–'}</b><span>Último peso</span></div>
           <div class="stat"><b class="${varCls}">${varTxt}</b><span>vs. hace 4 sem.${old ? '' : ' (sin datos)'}</span></div>
         </div>
+        ${e1rmBlock()}
       </div>
+      ${weekCard()}
+      ${muscleCard()}
+      ${stallsCard()}
+      ${bodyweightCard()}
       ${dayChartCard()}
       ${cycleChartCard()}`;
+  }
+
+  /* ---------- 1RM estimado, semana, músculos, estancamientos y peso corporal ---------- */
+
+  /** 1RM estimado del ejercicio elegido: récords, fuerza relativa y su gráfico. */
+  function e1rmBlock() {
+    const pts = S.e1rmSeries(ui.progKey);
+    const rec = S.records(ui.progKey);
+    const last = pts[pts.length - 1];
+    const bw = last ? S.bodyweightAt(last.date) : null;
+    const rel = last && bw ? fmt(Math.round((last.e1rm / bw) * 100) / 100) + '×' : '–';
+    const recLine = [
+      rec.weight ? `peso ${fmt(rec.weight.weight)} ${unit()} × ${rec.weight.reps} (${fmtShort(rec.weight.date)})` : '',
+      rec.e1rm ? `1RM est. ${fmt(rec.e1rm.e1rm)} ${unit()} (${fmtShort(rec.e1rm.date)})` : '',
+      rec.volume ? `volumen ${fmt(rec.volume.value)} ${unit()} (${fmtShort(rec.volume.date)})` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+        <h2 style="margin-top:16px">1RM estimado</h2>
+        <div class="stats">
+          <div class="stat"><b>${last ? fmt(last.e1rm) + ' ' + unit() : '–'}</b><span>Último</span></div>
+          <div class="stat"><b>${rec.e1rm ? fmt(rec.e1rm.e1rm) + ' ' + unit() : '–'}</b><span>Récord</span></div>
+          <div class="stat"><b>${rel}</b><span>Fuerza relativa${bw ? '' : ' (cargá tu peso)'}</span></div>
+        </div>
+        ${pts.length >= 2 ? '<div class="svgchart" data-chart="e1rm"></div>'
+          : `<p class="muted chart-empty">${pts.length ? 'Con 1 sesión todavía no hay evolución para mostrar.' : `Sin series de hasta ${S.E1RM_MAX_REPS} reps para estimar el 1RM.`}</p>`}
+        <p class="muted">Récords: ${recLine || 'sin datos'}. El 1RM se estima (fórmula de Epley) con series de hasta ${S.E1RM_MAX_REPS} reps.</p>`;
+  }
+
+  /** Resumen semanal: volumen y series por semana, y el detalle de la última semana. */
+  function weekCard() {
+    const weeks = S.weeklyStats();
+    if (!weeks.length) return `<div class="card"><h2>Por semana</h2><p class="muted chart-empty">Sin datos todavía: terminá una sesión para ver tu semana.</p></div>`;
+    const w = weeks[weeks.length - 1];
+    return `
+      <div class="card">
+        <h2>Por semana</h2>
+        ${weeks.length >= 2 ? '<div class="svgchart" data-chart="week"></div>' : '<p class="muted chart-empty">Con una sola semana registrada todavía no hay evolución.</p>'}
+        <p class="muted" style="margin-top:10px">Semana del ${esc(fmtShort(w.week))}:</p>
+        <div class="stats">
+          <div class="stat"><b>${w.sessions}</b><span>Sesiones</span></div>
+          <div class="stat"><b>${w.sets}</b><span>Series hechas</span></div>
+          <div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Efectivas (RIR ≤ ${S.EFFECTIVE_RIR_MAX})</span></div>
+          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>
+          <div class="stat"><b>${w.minutesAvg != null ? w.minutesAvg + ' min' : '–'}</b><span>Duración promedio</span></div>
+          <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen (${unit()})</span></div>
+        </div>
+        ${w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las efectivas solo cuentan las que tienen RIR.</p>` : ''}
+      </div>`;
+  }
+
+  /** Series por grupo muscular en la semana elegida (principal 1, secundario 0,5). */
+  function muscleCard() {
+    const weeks = S.weeklyStats().map((w) => w.week).reverse();
+    if (!weeks.length) return '';
+    if (!weeks.includes(ui.progWeek)) ui.progWeek = weeks[0];
+    const { list, unassigned } = S.muscleSets(ui.progWeek);
+    const max = Math.max(1, ...list.map((x) => x.sets));
+    const rows = list.map((x) => `
+        <div class="mrow"><span class="mname">${esc(x.muscle)}</span>
+          <span class="mbar"><i style="width:${Math.round((x.sets / max) * 100)}%"></i></span>
+          <b>${fmt(x.sets)}</b></div>`).join('');
+    return `
+      <div class="card">
+        <h2>Series por músculo</h2>
+        <label for="p-week">Semana</label>
+        <select id="p-week" data-f="progweek">${weeks.map((w) =>
+          `<option value="${esc(w)}" ${w === ui.progWeek ? 'selected' : ''}>Semana del ${esc(fmtShort(w))}</option>`).join('')}</select>
+        ${rows ? `<div class="mlist">${rows}</div>` : '<p class="muted chart-empty">Ningún ejercicio de esa semana tiene músculos asignados. Asignalos en Rutina (abrí cada ejercicio).</p>'}
+        ${unassigned ? `<p class="muted">${unassigned} serie(s) de ejercicios sin músculos asignados no se cuentan.</p>` : ''}
+        <p class="muted">Músculo principal = 1 serie · secundario = ${fmt(S.SECONDARY_MUSCLE_FACTOR)}.</p>
+      </div>`;
+  }
+
+  /** Ejercicios sin mejora del 1RM estimado en las últimas STALL_WEEKS semanas. */
+  function stallsCard() {
+    const list = S.stalls();
+    const body = list.length
+      ? list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> mejor antes ${fmt(x.before)} ${unit()} · últimas ${S.STALL_WEEKS} semanas ${fmt(x.after)} ${unit()} (${x.sessions} sesión/es)</div>`).join('')
+      : `<p class="muted">Ninguno: o mejoraste en las últimas ${S.STALL_WEEKS} semanas, o todavía no hay datos de antes y después para comparar.</p>`;
+    return `<div class="card"><h2>Estancamientos</h2>${body}<p class="muted">Compara tu mejor 1RM estimado de las últimas ${S.STALL_WEEKS} semanas contra el de antes.</p></div>`;
+  }
+
+  /** Evolución del peso corporal cargado en las sesiones. */
+  function bodyweightCard() {
+    const pts = S.bodyweightSeries();
+    return `
+      <div class="card">
+        <h2>Peso corporal</h2>
+        ${pts.length >= 2 ? '<div class="svgchart" data-chart="bw"></div>'
+          : `<p class="muted chart-empty">${pts.length ? 'Hay 1 registro (' + fmt(pts[0].kg) + ' ' + unit() + '): con el próximo vas a ver la evolución.' : 'Sin datos: cargalo en Entrenar, arriba, junto a la fecha.'}</p>`}
+      </div>`;
+  }
+
+  /** Gráfico de línea en SVG propio (mismo estilo que los demás): 1RM estimado o peso corporal. */
+  function svgLine({ labels, values, name, titles, width }) {
+    const W = Math.max(240, Math.floor(width)), H = 210;
+    const padL = 40, padR = 12, padT = 30, padB = 30;
+    const iw = W - padL - padR, ih = H - padT - padB, n = values.length;
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (hi === lo) { hi += 1; lo = Math.max(0, lo - 1); }
+    const span = hi - lo; lo = Math.max(0, lo - span * 0.15); hi += span * 0.15;
+    const x = (i) => padL + (n === 1 ? iw / 2 : (iw * i) / (n - 1));
+    const y = (v) => padT + ih - ((v - lo) / (hi - lo)) * ih;
+    let g = '';
+    for (let k = 0; k <= 4; k++) {
+      const yy = padT + (ih * k) / 4;
+      g += `<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" style="stroke:var(--sep)" stroke-width="1"/>`;
+      g += `<text x="${padL - 6}" y="${yy + 3.5}" text-anchor="end" class="ax">${shortNum(hi - ((hi - lo) * k) / 4)}</text>`;
+    }
+    g += `<path d="${values.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ')}" class="ln"/>`;
+    values.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" class="pt"><title>${esc(titles[i])}</title></circle>`; });
+    const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 48))));
+    labels.forEach((l, i) => {
+      const anchor = n > 1 && i === 0 ? 'start' : n > 1 && i === n - 1 ? 'end' : 'middle';
+      if (i % every === 0 || i === n - 1) g += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="${anchor}" class="ax">${esc(l)}</text>`;
+    });
+    const lg = `<circle cx="${padL + 4}" cy="12" r="4" class="pt"/><text x="${padL + 12}" y="16" class="lg">${esc(name)}</text>`;
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(name)}">${lg}${g}</svg>`;
   }
 
   /* ---------- ciclos y gráficos generales ---------- */
@@ -473,7 +602,7 @@
 
   /** Número corto para ejes: 950 · 4,3k · 12k. */
   const shortNum = (v) => (v >= 10000 ? Math.round(v / 1000) + 'k'
-    : v >= 1000 ? fmt(Math.round(v / 100) / 10) + 'k' : fmt(Math.round(v)));
+    : v >= 1000 ? fmt(Math.round(v / 100) / 10) + 'k' : v < 10 ? fmt(Math.round(v * 10) / 10) : fmt(Math.round(v)));
 
   /** Gráfico de barras (+ línea opcional en eje derecho) en SVG propio, al ancho exacto del contenedor.
    *  Usa los mismos colores del gráfico por ejercicio: barras grises, línea azul. */
@@ -517,6 +646,26 @@
   function drawSvgCharts() {
     document.querySelectorAll('.svgchart[data-chart]').forEach((el) => {
       const width = el.clientWidth;
+      if (el.dataset.chart === 'e1rm') {
+        const pts = S.e1rmSeries(ui.progKey);
+        el.innerHTML = svgLine({ width, labels: pts.map((p) => fmtShort(p.date)), values: pts.map((p) => p.e1rm),
+          name: `1RM estimado (${unit()})`,
+          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.e1rm)} ${unit()} (de ${fmt(p.weight)} × ${p.reps})`) });
+        return;
+      }
+      if (el.dataset.chart === 'bw') {
+        const pts = S.bodyweightSeries();
+        el.innerHTML = svgLine({ width, labels: pts.map((p) => fmtShort(p.date)), values: pts.map((p) => p.kg),
+          name: `Peso corporal (${unit()})`, titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.kg)} ${unit()}`) });
+        return;
+      }
+      if (el.dataset.chart === 'week') {
+        const ws = S.weeklyStats();
+        el.innerHTML = svgChart({ width, labels: ws.map((w) => fmtShort(w.week)), bars: ws.map((w) => w.volume),
+          line: ws.map((w) => w.sets), barName: `Volumen (${unit()})`, lineName: 'Series',
+          titles: ws.map((w) => `Semana del ${fmtShort(w.week)}: ${fmt(w.volume)} ${unit()} · ${w.sets} series · ${w.sessions} sesión/es`) });
+        return;
+      }
       if (el.dataset.chart === 'day') {
         const pts = S.dayVolumes(ui.progDay);
         el.innerHTML = svgChart({
@@ -629,6 +778,13 @@
           <button class="chip ${!e.usesBar && !e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="plain">Sin barra</button>
           <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-load" data-v="bar">Con barra</button>
           <button class="chip ${e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="bricks">Máquina con ladrillos</button>
+        </div>
+        <label>Músculos: 1 toque = principal · 2 = secundario (cuenta ${fmt(S.SECONDARY_MUSCLE_FACTOR)}) · 3 = quitar</label>
+        <div class="chips">
+          ${S.MUSCLES.map((m) => {
+            const k = e.muscles && e.muscles.primary.includes(m) ? 'p' : e.muscles && e.muscles.secondary.includes(m) ? 's' : '';
+            return `<button class="chip ${k === 'p' ? 'on' : k === 's' ? 'sec' : ''}" data-act="muscle" data-m="${esc(m)}">${esc(m)}${k === 's' ? ' · ½' : ''}</button>`;
+          }).join('')}
         </div>
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
@@ -875,7 +1031,8 @@
         c.exs.forEach((e) => {
           const prev = e.sets[e.sets.length - 1];
           e.sets.push({
-            weight: prev ? prev.weight : null, side: prev ? prev.side ?? null : null, reps: prev ? prev.reps : null,
+            weight: prev ? prev.weight : null, side: prev ? prev.side ?? null : null,
+            bricks: prev ? prev.bricks ?? null : null, reps: prev ? prev.reps : null,   // mismo orden que normSet
             drop: e.drop ? (prev && prev.drop ? Object.assign({}, prev.drop) : S.blankDrop(e.target && e.target.reps)) : null,
             note: '', done: false,
           });
@@ -922,6 +1079,18 @@
       case 'del-day': {
         const d = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
+        break;
+      }
+      case 'muscle': {                               // ninguno → principal → secundario → ninguno
+        const id = btn.closest('[data-id]').dataset.id;
+        const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
+        const m = btn.dataset.m, cur = ex.muscles || { primary: [], secondary: [] };
+        let p = cur.primary.filter((x) => x !== m), sec = cur.secondary.filter((x) => x !== m);
+        if (cur.primary.includes(m)) sec.push(m); else if (!cur.secondary.includes(m)) p.push(m);
+        const next = S.normMuscles({ primary: p, secondary: sec });
+        delete ex.muscles;
+        if (next) ex.muscles = next;                 // se guarda solo si hay alguno
+        S.commit(); ui.open.add(id); render();
         break;
       }
       case 'set-load': {
@@ -1012,6 +1181,23 @@
       el.classList.toggle('invalid', Number.isNaN(v));
       return;
     }
+    if (el.dataset.f === 'rir') {                  // repeticiones en reserva: entero de 0 a 10, opcional
+      const { st } = ctx(el);
+      if (!st) return;
+      let v = S.parseNum(el.value);
+      if (v != null && !Number.isNaN(v) && (!Number.isInteger(v) || v > 10)) v = NaN;
+      el.classList.toggle('invalid', Number.isNaN(v));
+      if (!Number.isNaN(v)) S.setSetRir(st, v);
+      return;
+    }
+    if (el.dataset.f === 'bodyweight') {
+      const s = currentSession();
+      let v = S.parseNum(el.value);
+      if (v === 0) v = NaN;
+      el.classList.toggle('invalid', Number.isNaN(v));
+      if (s && !Number.isNaN(v)) S.setSessionBodyweight(s, v);
+      return;
+    }
     if (el.dataset.f === 'reps') {
       const { st } = ctx(el);
       if (!st) return;
@@ -1080,6 +1266,7 @@
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; render(); return; }
     if (el.dataset.f === 'progday') { ui.progDay = el.value; render(); return; }
+    if (el.dataset.f === 'progweek') { ui.progWeek = el.value; render(); return; }
     if (el.dataset.f === 'comment') {                // se guarda al salir del campo
       if (S.setExerciseComment(el.dataset.name, el.value)) toast('Comentario guardado');
       return;
@@ -1101,11 +1288,12 @@
     if (el.classList.contains('invalid')) {
       toast('Valor no válido: se restauró el anterior');
       const { st, ex } = ctx(el);
-      if (st && ['weight', 'side', 'bricks', 'reps', 'dweight', 'dside', 'dbricks', 'dreps'].includes(el.dataset.f)) {
+      if (st && ['weight', 'side', 'bricks', 'reps', 'dweight', 'dside', 'dbricks', 'dreps', 'rir'].includes(el.dataset.f)) {
         const d = st.drop || {};
         el.value = {
           weight: fmt(st.weight), side: fmt(S.sideOf(st, ex.bar)), bricks: fmt(S.bricksOf(st)), reps: st.reps ?? '',
           dweight: fmt(d.weight), dside: fmt(S.sideOf(d, ex.bar)), dbricks: fmt(S.bricksOf(d)), dreps: d.reps ?? '',
+          rir: st.rir ?? '',
         }[el.dataset.f];
         el.classList.remove('invalid');
       } else render();

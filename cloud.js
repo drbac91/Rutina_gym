@@ -56,13 +56,50 @@
   /** Huella del documento de rutina. Los comentarios por ejercicio entran SOLO si hay alguno:
    *  así, para quien no tiene comentarios la huella es idéntica a la de versiones anteriores
    *  y un dispositivo recién actualizado no cree que su rutina cambió (y no pisa la de la nube). */
-  const routineHash = () => {
+  /** Texto canónico: claves ordenadas, sin campos vacíos (null, false, ''), textos en NFC.
+   *  Así dos versiones con el mismo CONTENIDO dan la misma huella aunque los campos
+   *  estén en otro orden o falte un campo opcional. */
+  function canon(v) {
+    if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+    if (v && typeof v === 'object') {
+      return '{' + Object.keys(v).sort()
+        .filter((k) => v[k] != null && v[k] !== false && v[k] !== '')
+        .map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+    }
+    return typeof v === 'string' ? JSON.stringify(v.normalize('NFC')) : JSON.stringify(v);
+  }
+  /** Huella del documento de rutina (comentarios incluidos si hay alguno). */
+  const routineDocHash = (routine, weightUnit, comments) => {
+    const doc = { routine: S.canonRoutine(routine), weightUnit: weightUnit || 'kg' };
+    if (comments && Object.keys(comments).length) doc.exerciseComments = S.normComments(comments);
+    return hash(canon(doc));
+  };
+  const routineHash = () => routineDocHash(S.state.routine, S.state.weightUnit, S.state.exerciseComments);
+  /** Huella de una sesión (sin updatedAt, que es solo la marca de tiempo de la subida). */
+  const sessionHash = (s) => hash(canon(S.canonSession(s)));
+
+  /* Huellas de la versión anterior (texto crudo, sensible al orden). Solo se usan UNA vez,
+     en la transición, para saber qué estaba realmente sincronizado. */
+  const HASH_VERSION = '2';
+  const HASHV_KEY = 'gymapp.hashv';
+  const CONFLICTS_KEY = 'gymapp.v1.conflicts';
+  const oldSessionHash = (s) => { const { updatedAt, ...rest } = s; return hash(JSON.stringify(rest)); };
+  const oldRoutineHash = () => {
     const doc = { routine: S.state.routine, weightUnit: S.state.weightUnit };
     const c = S.state.exerciseComments;
     if (c && Object.keys(c).length) doc.exerciseComments = c;
     return hash(JSON.stringify(doc));
   };
-  const sessionHash = (s) => { const { updatedAt, ...rest } = s; return hash(JSON.stringify(rest)); };
+  /** Documentos cuya huella vieja no coincidía al pasar a la nueva: se resuelven al ver la nube. */
+  let transitional = new Set();
+
+  /** Copia de seguridad local de lo que se reemplaza por la nube en la transición (últimas 20). */
+  function backupConflict(kind, data) {
+    let list = [];
+    try { list = JSON.parse(store.get(CONFLICTS_KEY)) || []; } catch (e) { list = []; }
+    list.push({ at: Date.now(), kind, data: JSON.parse(JSON.stringify(data)) });
+    store.set(CONFLICTS_KEY, JSON.stringify(list.slice(-20)));
+  }
   /** Firma de una rutina ignorando los ids (para detectar la rutina de fábrica). */
   const sig = (r) => JSON.stringify(r.days.map((d) => [d.name, d.exercises.map((e) => [e.name, e.sets, e.reps, e.targetWeight, e.notes])])).normalize('NFC');
 
@@ -184,6 +221,22 @@
     }
     store.set(OWNER_KEY, uid);
 
+    // Transición a las huellas por contenido (una sola vez por dispositivo): lo que estaba
+    // sincronizado según la huella vieja se marca como sincronizado con la nueva, sin subir nada.
+    transitional = new Set();
+    if (store.get(HASHV_KEY) !== HASH_VERSION) {
+      Object.keys(pushed).forEach((k) => {
+        if (k === 'routine') {
+          if (pushed.routine === oldRoutineHash()) pushed.routine = routineHash(); else transitional.add('routine');
+          return;
+        }
+        const s = S.find(S.state.sessions, k.slice(2));
+        if (!s) return;                                  // borrada acá: se sigue borrando en la nube
+        if (pushed[k] === oldSessionHash(s)) pushed[k] = sessionHash(s); else transitional.add(k);
+      });
+      savePushed();
+    }
+
     S.onCommit = schedulePush;
 
     unsubs.push(routineRef().onSnapshot({ includeMetadataChanges: true }, onRoutineSnap, onListenError));
@@ -248,13 +301,22 @@
   /** Aplica una sesión de la nube. Si acá hay cambios sin subir, gana lo local. */
   function applyRemoteSession(id, data) {
     const local = S.find(S.state.sessions, id);
+    const k = 's:' + id;
     if (local) {
-      const dirty = pushed['s:' + id] !== sessionHash(local);
-      if (dirty) return false;
-      if ((Number(data.updatedAt) || 0) <= (Number(local.updatedAt) || 0)) return false;
+      const remoteNewer = (Number(data.updatedAt) || 0) > (Number(local.updatedAt) || 0);
+      if (pushed[k] !== sessionHash(local)) {
+        // Mismo contenido que la nube: ya está sincronizada (no se vuelve a subir).
+        if (sessionHash(Object.assign({}, data, { id })) === sessionHash(local)) {
+          pushed[k] = sessionHash(local); transitional.delete(k); return false;
+        }
+        if (!transitional.has(k)) return false;          // edición local real: gana lo local
+        transitional.delete(k);
+        if (!remoteNewer) return false;                  // la local es la más nueva: se sube
+        backupConflict('session', local);                // transición: gana la nube, copia local de respaldo
+      } else if (!remoteNewer) return false;
     }
     const s = S.upsertSession(Object.assign({}, data, { id }));
-    pushed['s:' + id] = sessionHash(s);
+    pushed[k] = sessionHash(s);
     return true;
   }
 
@@ -262,9 +324,22 @@
   function handleRoutine(data) {
     if (!data || !data.routine || !Array.isArray(data.routine.days)) return false;
     const st = S.state;
-    const dirty = pushed.routine !== routineHash();
+    let dirty = pushed.routine !== routineHash();
     const remoteNewer = (Number(data.updatedAt) || 0) > (Number(st.routineUpdatedAt) || 0);
     let take = false;
+
+    // Mismo contenido que la nube (los comentarios solo se comparan si la nube los trae): sincronizada.
+    if (dirty && routineDocHash(data.routine, data.weightUnit,
+      data.exerciseComments !== undefined ? data.exerciseComments : st.exerciseComments) === routineHash()) {
+      pushed.routine = routineHash(); transitional.delete('routine'); savePushed();
+      dirty = false;
+    }
+    if (dirty && transitional.has('routine')) {
+      transitional.delete('routine');
+      if (!remoteNewer) return false;                    // la local es la más nueva: se sube
+      backupConflict('routine', { routine: st.routine, weightUnit: st.weightUnit, exerciseComments: st.exerciseComments });
+      dirty = false;                                     // transición: gana la nube (con copia local)
+    }
 
     if (!dirty) {
       take = remoteNewer;
@@ -293,14 +368,19 @@
     // Sesiones que ya habíamos subido y ya no están en la nube: se borraron en otro dispositivo.
     S.state.sessions.slice().forEach((s) => {
       const k = 's:' + s.id;
-      if (pushed[k] && !remoteIds.has(s.id) && pushed[k] === sessionHash(s)) {
+      const clean = pushed[k] === sessionHash(s);
+      if (pushed[k] && !remoteIds.has(s.id) && (clean || transitional.has(k))) {
+        if (!clean) backupConflict('session', s);        // transición: se respeta el borrado, con copia local
         S.removeSession(s.id);
         delete pushed[k];
+        transitional.delete(k);
         changed = true;
       }
     });
     if (remoteRoutine && handleRoutine(remoteRoutine)) changed = true;
 
+    transitional.clear();                               // la transición terminó: de acá en más, reglas normales
+    store.set(HASHV_KEY, HASH_VERSION);
     savePushed();
     pushDiff();                                          // sube todo lo local que falte (primer login, cambios offline)
     refreshStatus();
