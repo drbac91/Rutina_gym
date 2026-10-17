@@ -368,3 +368,19 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .svgchart .ln { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .svgchart .pt { fill: var(--accent); }
 .chart-empty { background: var(--fill); border-radius: 12px; padding: 14px; margin-top: 12px; text-align: center; }
+
+/* ---------- RIR por serie (segunda línea, debajo de las reps) ---------- */
+.set .rir { grid-column: 3; min-height: 34px !important; font-size: .9rem !important; padding: 4px 2px; text-align: center; font-weight: 500; }
+.ssinputs .rir { grid-column: 2; min-height: 34px !important; font-size: .9rem !important; padding: 4px 2px; text-align: center; }
+
+/* ---------- músculos en el editor ---------- */
+.chip.sec { background: var(--warn-bg); color: var(--warn); }
+
+/* ---------- series por músculo ---------- */
+.mlist { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.mrow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 40px; gap: 8px; align-items: center; font-size: .9rem; }
+.mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbar { height: 12px; background: var(--fill); border-radius: 99px; overflow: hidden; }
+.mbar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.mrow b { text-align: right; font-variant-numeric: tabular-nums; }
+.stats .stat span { overflow-wrap: anywhere; }
