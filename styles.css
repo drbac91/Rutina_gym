@@ -384,3 +384,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .mbar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
 .mrow b { text-align: right; font-variant-numeric: tabular-nums; }
 .stats .stat span { overflow-wrap: anywhere; }
+
+/* ---------- registro de peso corporal (Progreso) ---------- */
+.bwform { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
+.bwlist { margin-top: 12px; }
+.bwrow { display: grid; grid-template-columns: minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: .5px solid var(--sep); font-size: .9375rem; }
+.bwrow:last-child { border-bottom: 0; }
+.bwrow .x { min-height: 36px; padding: 0; background: none; color: var(--muted); font-size: 1.2rem; }
