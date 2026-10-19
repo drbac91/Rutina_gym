@@ -196,9 +196,6 @@
       <div class="card">
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
-        <label for="s-bw">Peso corporal (${unit()}, opcional)</label>
-        <input id="s-bw" data-f="bodyweight" inputmode="decimal" value="${fmt(s.bodyweight)}"
-          placeholder="${S.bodyweightAt(s.date) != null ? 'último: ' + fmt(S.bodyweightAt(s.date)) : 'ej.: 78,5'}">
       </div>
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
@@ -455,7 +452,7 @@
         <div class="stats">
           <div class="stat"><b>${last ? fmt(last.e1rm) + ' ' + unit() : '–'}</b><span>Último</span></div>
           <div class="stat"><b>${rec.e1rm ? fmt(rec.e1rm.e1rm) + ' ' + unit() : '–'}</b><span>Récord</span></div>
-          <div class="stat"><b>${rel}</b><span>Fuerza relativa${bw ? '' : ' (cargá tu peso)'}</span></div>
+          <div class="stat"><b>${rel}</b><span>Fuerza relativa${bw ? '' : ' (cargá tu peso abajo)'}</span></div>
         </div>
         ${pts.length >= 2 ? '<div class="svgchart" data-chart="e1rm"></div>'
           : `<p class="muted chart-empty">${pts.length ? 'Con 1 sesión todavía no hay evolución para mostrar.' : `Sin series de hasta ${S.E1RM_MAX_REPS} reps para estimar el 1RM.`}</p>`}
@@ -516,14 +513,25 @@
     return `<div class="card"><h2>Estancamientos</h2>${body}<p class="muted">Compara tu mejor 1RM estimado de las últimas ${S.STALL_WEEKS} semanas contra el de antes.</p></div>`;
   }
 
-  /** Evolución del peso corporal cargado en las sesiones. */
+  /** Peso corporal: se carga acá y cada valor rige como referencia hasta el siguiente. */
   function bodyweightCard() {
     const pts = S.bodyweightSeries();
+    const cur = S.bodyweightAt(S.todayStr());
+    const curDate = pts.filter((x) => x.date <= S.todayStr()).pop();
+    const recent = pts.slice(-5).reverse().map((x) => `
+        <div class="bwrow"><span>${esc(fmtDate(x.date))}</span><b>${fmt(x.kg)} ${unit()}</b>
+          <button class="x" data-act="bw-del" data-date="${esc(x.date)}" aria-label="Borrar el registro del ${esc(fmtShort(x.date))}">×</button></div>`).join('');
     return `
       <div class="card">
         <h2>Peso corporal</h2>
-        ${pts.length >= 2 ? '<div class="svgchart" data-chart="bw"></div>'
-          : `<p class="muted chart-empty">${pts.length ? 'Hay 1 registro (' + fmt(pts[0].kg) + ' ' + unit() + '): con el próximo vas a ver la evolución.' : 'Sin datos: cargalo en Entrenar, arriba, junto a la fecha.'}</p>`}
+        <p class="muted">${cur != null ? `Referencia actual: <b>${fmt(cur)} ${unit()}</b>${curDate ? ' (desde el ' + esc(fmtShort(curDate.date)) + ')' : ''}. Se usa hasta que cargues uno nuevo.` : 'Cargalo cuando te peses: se usa como referencia hasta que cargues uno nuevo.'}</p>
+        <div class="bwform">
+          <div><label for="bw-kg">Peso (${unit()})</label><input id="bw-kg" inputmode="decimal" placeholder="ej.: 78,5"></div>
+          <div><label for="bw-date">Fecha</label><input id="bw-date" type="date" value="${esc(S.todayStr())}"></div>
+        </div>
+        <button class="primary block" style="margin-top:10px" data-act="bw-save">Guardar peso</button>
+        ${pts.length >= 2 ? '<div class="svgchart" data-chart="bw"></div>' : ''}
+        ${recent ? `<div class="bwlist">${recent}</div>` : ''}
       </div>`;
   }
 
@@ -1081,6 +1089,17 @@
         if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
         break;
       }
+      case 'bw-save': {
+        const kgEl = document.getElementById('bw-kg'), dEl = document.getElementById('bw-date');
+        const kg = S.parseNum(kgEl.value);
+        if (kg == null || Number.isNaN(kg) || kg <= 0 || kg >= 500) { kgEl.classList.add('invalid'); toast('Cargá un peso válido'); break; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dEl.value)) { toast('Elegí una fecha'); break; }
+        S.setBodyweight(dEl.value, kg); toast('Peso guardado ✓'); render();
+        break;
+      }
+      case 'bw-del':
+        if (confirm('¿Borrar este registro de peso?')) { S.deleteBodyweight(btn.dataset.date); render(); }
+        break;
       case 'muscle': {                               // ninguno → principal → secundario → ninguno
         const id = btn.closest('[data-id]').dataset.id;
         const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
@@ -1188,14 +1207,6 @@
       if (v != null && !Number.isNaN(v) && (!Number.isInteger(v) || v > 10)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
       if (!Number.isNaN(v)) S.setSetRir(st, v);
-      return;
-    }
-    if (el.dataset.f === 'bodyweight') {
-      const s = currentSession();
-      let v = S.parseNum(el.value);
-      if (v === 0) v = NaN;
-      el.classList.toggle('invalid', Number.isNaN(v));
-      if (s && !Number.isNaN(v)) S.setSessionBodyweight(s, v);
       return;
     }
     if (el.dataset.f === 'reps') {

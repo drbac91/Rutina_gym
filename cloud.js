@@ -69,12 +69,14 @@
     return typeof v === 'string' ? JSON.stringify(v.normalize('NFC')) : JSON.stringify(v);
   }
   /** Huella del documento de rutina (comentarios incluidos si hay alguno). */
-  const routineDocHash = (routine, weightUnit, comments) => {
+  const routineDocHash = (routine, weightUnit, comments, bodyweights) => {
     const doc = { routine: S.canonRoutine(routine), weightUnit: weightUnit || 'kg' };
     if (comments && Object.keys(comments).length) doc.exerciseComments = S.normComments(comments);
+    const bw = S.normBodyweights(bodyweights);          // peso corporal: solo si hay registros
+    if (bw.length) doc.bodyweights = bw;
     return hash(canon(doc));
   };
-  const routineHash = () => routineDocHash(S.state.routine, S.state.weightUnit, S.state.exerciseComments);
+  const routineHash = () => routineDocHash(S.state.routine, S.state.weightUnit, S.state.exerciseComments, S.state.bodyweights);
   /** Huella de una sesión (sin updatedAt, que es solo la marca de tiempo de la subida). */
   const sessionHash = (s) => hash(canon(S.canonSession(s)));
 
@@ -330,14 +332,15 @@
 
     // Mismo contenido que la nube (los comentarios solo se comparan si la nube los trae): sincronizada.
     if (dirty && routineDocHash(data.routine, data.weightUnit,
-      data.exerciseComments !== undefined ? data.exerciseComments : st.exerciseComments) === routineHash()) {
+      data.exerciseComments !== undefined ? data.exerciseComments : st.exerciseComments,
+      data.bodyweights !== undefined ? data.bodyweights : st.bodyweights) === routineHash()) {
       pushed.routine = routineHash(); transitional.delete('routine'); savePushed();
       dirty = false;
     }
     if (dirty && transitional.has('routine')) {
       transitional.delete('routine');
       if (!remoteNewer) return false;                    // la local es la más nueva: se sube
-      backupConflict('routine', { routine: st.routine, weightUnit: st.weightUnit, exerciseComments: st.exerciseComments });
+      backupConflict('routine', { routine: st.routine, weightUnit: st.weightUnit, exerciseComments: st.exerciseComments, bodyweights: st.bodyweights });
       dirty = false;                                     // transición: gana la nube (con copia local)
     }
 
@@ -353,7 +356,7 @@
       if (take) S.backup();
     }
     if (!take) return false;
-    S.setRoutine(data.routine, data.weightUnit, data.updatedAt, data.exerciseComments);   // sin el campo, se conservan los locales
+    S.setRoutine(data.routine, data.weightUnit, data.updatedAt, data.exerciseComments, data.bodyweights);   // sin el campo, se conservan los locales
     pushed.routine = routineHash();
     savePushed();
     return true;
@@ -407,7 +410,7 @@
       st.routineUpdatedAt = now;
       ops.push({ key: 'routine', hash: rh, ref: routineRef(),
                  data: { routine: st.routine, weightUnit: st.weightUnit, updatedAt: now,
-                         exerciseComments: st.exerciseComments || {} } });
+                         exerciseComments: st.exerciseComments || {}, bodyweights: st.bodyweights || [] } });
     }
     const seen = new Set();
     st.sessions.forEach((s) => {

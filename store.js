@@ -199,6 +199,16 @@
     return out;
   }
 
+  /** Limpia el registro de peso corporal: fechas válidas, kg razonables, uno por fecha, en orden. */
+  function normBodyweights(list) {
+    const byDate = new Map();
+    (Array.isArray(list) ? list : []).forEach((x) => {
+      const kg = Number(x && x.kg);
+      if (x && /^\d{4}-\d{2}-\d{2}$/.test(x.date) && Number.isFinite(kg) && kg > 0 && kg < 500) byDate.set(x.date, kg);
+    });
+    return [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, kg]) => ({ date, kg }));
+  }
+
   /** Valida y limpia un objeto con formato rutina.json. Lanza Error en español. */
   function normalize(d) {
     if (!d || typeof d !== 'object') throw new Error('El archivo no es un JSON de rutina válido.');
@@ -211,6 +221,8 @@
       // Comentarios por ejercicio para próximas sesiones: { nombreNormalizado: texto }.
       // Viven FUERA de routine.days, así "Importar solo la rutina" no los borra.
       exerciseComments: normComments(d.exerciseComments),
+      // Registro de peso corporal [{ date, kg }]: cada valor rige hasta el siguiente. Fuera de routine.
+      bodyweights: normBodyweights(d.bodyweights),
       routine: {
         days: days.map((day, i) => ({
           id: String((day && day.id) || uid()),
@@ -718,7 +730,26 @@
   }
 
   /** Peso corporal registrado en las sesiones: [{ date, kg }] en orden. */
-  const bodyweightSeries = () => sortedSessions().filter((s) => s.bodyweight).map((s) => ({ date: s.date, kg: s.bodyweight }));
+  /** Peso corporal en el tiempo: el registro de Progreso más (por compatibilidad) los pesos
+   *  que se hayan cargado dentro de alguna sesión. Si coinciden en fecha, gana el registro. */
+  function bodyweightSeries() {
+    const byDate = new Map();
+    sortedSessions().forEach((s) => { if (s.bodyweight) byDate.set(s.date, s.bodyweight); });
+    (state.bodyweights || []).forEach((x) => byDate.set(x.date, x.kg));
+    return [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, kg]) => ({ date, kg }));
+  }
+
+  /** Registra (o corrige) el peso corporal de una fecha. */
+  function setBodyweight(date, kg) {
+    state.bodyweights = normBodyweights([...(state.bodyweights || []), { date, kg }]);
+    commit();                                            // se sincroniza junto con la rutina
+  }
+
+  /** Borra el registro de peso de una fecha. */
+  function deleteBodyweight(date) {
+    state.bodyweights = (state.bodyweights || []).filter((x) => x.date !== date);
+    commit();
+  }
 
   /** Último peso corporal registrado en o antes de una fecha (o el primero, si no hay antes). */
   function bodyweightAt(date) {
@@ -771,10 +802,11 @@
   /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
 
   /** Reemplaza la rutina con la de la nube, sin disparar una nueva subida. */
-  function setRoutine(routine, weightUnit, updatedAt, comments) {
+  function setRoutine(routine, weightUnit, updatedAt, comments, bodyweights) {
     state.routine = normalize({ routine }).routine;
     if (weightUnit) state.weightUnit = weightUnit;
     if (comments !== undefined) state.exerciseComments = normComments(comments);   // si no vienen, se conservan
+    if (bodyweights !== undefined) state.bodyweights = normBodyweights(bodyweights); // ídem
     state.routineUpdatedAt = Number(updatedAt) || 0;
     commit(true);
   }
@@ -870,7 +902,7 @@
     addExercise, deleteExercise, moveExercise,
     BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
-    bodyweightSeries, bodyweightAt, setSessionBodyweight, setSetRir, normMuscles,
+    bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
     lastEntry, startSession, finishSession, deleteSession,
