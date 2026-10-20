@@ -21,7 +21,7 @@
 
   /** Barras disponibles en el gimnasio (kg), en el orden en que se ofrecen en "Barra de hoy". */
   const BARS = [25, 20, 17.5, 7.5];
-  /** Peso de cada ladrillo de las máquinas (kg). */
+  /** Peso de cada bloque de las máquinas (kg). */
   const BRICK_KG = 5;
 
   /* ---------- umbrales de las métricas de Progreso (ajustables) ---------- */
@@ -84,7 +84,7 @@
       original: String(e.original || ''),
       group: String(e.group || ''),          // misma marca en ejercicios consecutivos = superserie
       usesBar,                                // lleva barra: se cargan discos por lado
-      usesBricks: !usesBar && !!e.usesBricks,  // máquina con ladrillos (excluyente con barra)
+      usesBricks: !usesBar && !!e.usesBricks,  // máquina con bloques (excluyente con barra)
     }, 'muscles', muscles);                   // grupos musculares (opcional)
   }
 
@@ -114,7 +114,7 @@
     const out = {
       weight: num(s.weight),            // SIEMPRE el total (barra + discos): historial y gráficos usan esto
       side: num(s.side),                // discos por lado, solo en ejercicios con barra
-      bricks: num(s.bricks),            // ladrillos, solo en máquinas con ladrillos (weight = bricks × 5)
+      bricks: num(s.bricks),            // bloques, solo en máquinas con bloques (weight = bricks × 5)
       reps: num(s.reps),
       drop: drop && (drop.weight != null || drop.reps != null) ? drop : null,
       note: String(s.note || ''),
@@ -324,9 +324,9 @@
     return st.weight >= bar ? round2((st.weight - bar) / 2) : null;
   }
 
-  /* ---------- ladrillos: cantidad ↔ total ---------- */
+  /* ---------- bloques: cantidad ↔ total ---------- */
 
-  /** Total de una máquina con ladrillos: ladrillos × 5 kg. */
+  /** Total de una máquina con bloques: bloques × 5 kg. */
   const bricksTotal = (bricks) => (bricks == null ? null : round2(bricks * BRICK_KG));
   /** Ladrillos de una serie: los guardados o, si faltan (datos viejos), deducidos del total. */
   function bricksOf(st) {
@@ -472,7 +472,7 @@
               if (set.drop.side != null) set.drop.weight = barTotal(lastBar, set.drop.side);
             }
           } else if (ex.usesBricks) {
-            // Máquina con ladrillos: se recuerdan los LADRILLOS de la última sesión; total = ladrillos × 5.
+            // Máquina con bloques: se recuerdan los LADRILLOS de la última sesión; total = bloques × 5.
             set.bricks = src ? bricksOf(src) : (ex.targetWeight != null ? round2(ex.targetWeight / BRICK_KG) : null);
             set.weight = bricksTotal(set.bricks);
             if (set.drop) {
