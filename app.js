@@ -149,7 +149,7 @@
         if (!st) return '';
         return `
           <div class="ssline" data-ex="${i}">
-            <span class="ssname">${esc(s.exercises[i].name)}${{ bar: ' · discos por lado', bricks: ' · ladrillos', plain: '' }[loadMode(s.exercises[i])]}</span>
+            <span class="ssname">${esc(s.exercises[i].name)}${{ bar: ' · discos por lado', bricks: ' · bloques', plain: '' }[loadMode(s.exercises[i])]}</span>
             <div class="ssinputs">
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
@@ -215,9 +215,9 @@
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
 
-  /* ---------- peso: directo, por lado (barra) o en ladrillos (máquina) ---------- */
+  /* ---------- peso: directo, por lado (barra) o en bloques (máquina) ---------- */
 
-  /** Cómo se carga el peso de un ejercicio: 'bar' (discos por lado), 'bricks' (ladrillos) o 'plain'. */
+  /** Cómo se carga el peso de un ejercicio: 'bar' (discos por lado), 'bricks' (bloques) o 'plain'. */
   const loadMode = (ex) => (ex.usesBar ? 'bar' : ex.usesBricks ? 'bricks' : 'plain');
   /** Campo del modelo según el modo: el total siempre queda en "weight". */
   const LOAD_KEY = { bar: 'side', bricks: 'bricks', plain: 'weight' };
@@ -225,19 +225,19 @@
   /** Texto bajo el campo: "= 60 kg" (o qué falta para calcularlo). */
   function totText(st, ex, isDrop) {
     const w = isDrop ? (st.drop && st.drop.weight) : st.weight;
-    if (loadMode(ex) === 'bricks') return w != null ? `= ${fmt(w)} ${unit()}` : `${fmt(S.BRICK_KG)} ${unit()} c/ladrillo`;
+    if (loadMode(ex) === 'bricks') return w != null ? `= ${fmt(w)} ${unit()}` : `${fmt(S.BRICK_KG)} ${unit()} c/bloque`;
     if (ex.bar == null) return 'elegí la barra ↑';
     return w != null ? `= ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
   }
 
-  /** Campo de peso con sus botones −/+. Con barra: discos POR LADO; con ladrillos: cantidad de LADRILLOS. */
+  /** Campo de peso con sus botones −/+. Con barra: discos POR LADO; con bloques: cantidad de BLOQUES. */
   function weightField(st, ex, isDrop, aria) {
     const mode = loadMode(ex);
     const src = isDrop ? (st.drop || {}) : st;
     const f = (isDrop ? 'd' : '') + LOAD_KEY[mode];
     const val = mode === 'bar' ? S.sideOf(src, ex.bar) : mode === 'bricks' ? S.bricksOf(src) : src.weight;
-    const ph = mode === 'bar' ? 'x lado' : mode === 'bricks' ? 'ladrillos' : (isDrop ? 'drop kg' : '0');
-    const hint = mode === 'bar' ? ' (discos por lado)' : mode === 'bricks' ? ' (ladrillos)' : '';
+    const ph = mode === 'bar' ? 'x lado' : mode === 'bricks' ? 'bloques' : (isDrop ? 'drop kg' : '0');
+    const hint = mode === 'bar' ? ' (discos por lado)' : mode === 'bricks' ? ' (bloques)' : '';
     return `
         <div class="stepper">
           <button data-act="${isDrop ? 'dw-' : 'w-'}" aria-label="Menos peso">−</button>
@@ -247,10 +247,10 @@
   }
   const totCaption = (st, ex, isDrop) => (loadMode(ex) !== 'plain' ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
   /** Encabezado de la columna de peso según el modo. */
-  const weightHead = (ex) => ({ bar: unit() + ' por lado', bricks: 'ladrillos', plain: unit() }[loadMode(ex)]);
+  const weightHead = (ex) => ({ bar: unit() + ' por lado', bricks: 'bloques', plain: unit() }[loadMode(ex)]);
 
   /** Guarda un peso tecleado y recalcula el total:
-   *  barra → barra + 2 × lado · ladrillos → ladrillos × 5 · directo → tal cual. */
+   *  barra → barra + 2 × lado · bloques → bloques × 5 · directo → tal cual. */
   function setWeight(st, ex, f, v) {
     const isDrop = f.charAt(0) === 'd';
     const key = isDrop ? f.slice(1) : f;
@@ -761,7 +761,7 @@
   }
 
   /** Resumen de un ejercicio en el editor: "4×5 · 60 kg · barra 20". */
-  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : e.usesBricks ? ' · con ladrillos' : ''}`;
+  const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : e.usesBricks ? ' · con bloques' : ''}`;
 
   function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
@@ -781,11 +781,11 @@
           <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
           <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
-        <label>¿Cómo se carga el peso? (con barra: discos por lado · con ladrillos: cantidad × ${fmt(S.BRICK_KG)} kg)</label>
+        <label>¿Cómo se carga el peso? (con barra: discos por lado · con bloques: cantidad × ${fmt(S.BRICK_KG)} kg)</label>
         <div class="chips">
           <button class="chip ${!e.usesBar && !e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="plain">Sin barra</button>
           <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-load" data-v="bar">Con barra</button>
-          <button class="chip ${e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="bricks">Máquina con ladrillos</button>
+          <button class="chip ${e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="bricks">Máquina con bloques</button>
         </div>
         <label>Músculos: 1 toque = principal · 2 = secundario (cuenta ${fmt(S.SECONDARY_MUSCLE_FACTOR)}) · 3 = quitar</label>
         <div class="chips">
@@ -991,8 +991,8 @@
         const input = btn.parentElement.querySelector('input');
         const f = input.dataset.f;                         // weight | side | bricks (con "d" adelante: drop)
         const key = f.charAt(0) === 'd' ? f.slice(1) : f;
-        // por lado: 1,25 (= 2,5 al total) · ladrillos: 0,5 · peso directo: 2,5
-        const step = key === 'side' ? 1.25 : key === 'bricks' ? 0.5 : 2.5;
+        // por lado: 1,25 (= 2,5 al total) · bloques: 1 · peso directo: 2,5
+        const step = key === 'side' ? 1.25 : key === 'bricks' ? 1 : 2.5;
         const cur = S.parseNum(input.value);
         let base = Number.isNaN(cur) ? null : cur;
         if (base == null) {
@@ -1115,7 +1115,7 @@
       case 'set-load': {
         const id = btn.closest('[data-id]').dataset.id;
         const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
-        ex.usesBar = btn.dataset.v === 'bar';                // barra y ladrillos son excluyentes
+        ex.usesBar = btn.dataset.v === 'bar';                // barra y bloques son excluyentes
         ex.usesBricks = btn.dataset.v === 'bricks';
         S.commit(); ui.open.add(id); render();
         break;
