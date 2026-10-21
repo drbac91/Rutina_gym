@@ -399,6 +399,16 @@
     if (day) { move(day.exercises, day.exercises.findIndex((e) => e.id === exId), dir); commit(); }
   }
 
+  /** Mueve un ejercicio a una posición exacta del mismo día (equivale a varios Subir/Bajar seguidos). */
+  function moveExerciseTo(dayId, exId, to) {
+    const day = find(state.routine.days, dayId);
+    if (!day) return;
+    const from = day.exercises.findIndex((e) => e.id === exId);
+    if (from < 0 || to < 0 || to >= day.exercises.length || to === from) return;
+    day.exercises.splice(to, 0, day.exercises.splice(from, 1)[0]);
+    commit();
+  }
+
   /* ---------- sesiones ---------- */
 
   const sortedSessions = () =>
@@ -899,7 +909,7 @@
     sessions: sortedSessions,
     find,
     addDay, deleteDay, moveDay,
-    addExercise, deleteExercise, moveExercise,
+    addExercise, deleteExercise, moveExercise, moveExerciseTo,
     BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
     bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, normMuscles,
