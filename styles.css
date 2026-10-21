@@ -436,6 +436,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .mbar { height: 12px; background: var(--fill); border-radius: 99px; overflow: hidden; }
 .mbar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
 .mrow b { text-align: right; font-variant-numeric: tabular-nums; }
+.mrow.zero .mname, .mrow.zero b { color: var(--warn); }
+.warn-txt { color: var(--warn); }
+.svgchart .bar.inc { fill: var(--warn); fill-opacity: .55; }   /* ciclo incompleto */
 .stats .stat span { overflow-wrap: anywhere; }
 
 /* ---------- registro de peso corporal (Progreso) ---------- */
