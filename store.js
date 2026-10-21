@@ -16,8 +16,19 @@
   'use strict';
 
   const KEY = 'gymapp.v1';
-  const BACKUP_KEY = 'gymapp.v1.backup';   // copia previa a importar/restaurar
+  const BACKUP_KEY = 'gymapp.v1.backup';   // copias automáticas previas a importar/restaurar (lista)
+  const MAX_BACKUPS = 3;
+  const OWNER_KEY = 'gymapp.owner';        // lo escribe cloud.js: cuenta dueña de los datos locales
   let state = null;
+
+  /* Varias pestañas o ventanas abiertas a la vez: cada una tiene su copia en memoria y, si todas
+     guardaran, la última pisaría lo de las otras. Por eso escribe UNA sola, la última que se usó
+     (TAB_KEY); las demás quedan en pausa sin guardar. Cada guardado cambia REV_KEY: si antes de
+     guardar el valor no es el que esta pestaña dejó, otra guardó en el medio y esta no la pisa. */
+  const TAB_KEY = 'gymapp.tab';
+  const REV_KEY = 'gymapp.rev';
+  const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  let active = true, lastRev = null, revN = 0;
 
   /** Barras disponibles en el gimnasio (kg), en el orden en que se ofrecen en "Barra de hoy". */
   const BARS = [25, 20, 17.5, 7.5];
@@ -238,41 +249,140 @@
 
   /** Guarda todo el estado. Se llama después de cada cambio. */
   function commit(silent) {
+    if (!canWrite()) return false;
     let ok = true;
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch (err) {
-      ok = false;
-      if (Store.onSaveError) Store.onSaveError(err);
+      // Sin lugar: lo actual vale más que las copias automáticas; se sacan y se reintenta.
+      try {
+        if (!localStorage.getItem(BACKUP_KEY)) throw err;
+        localStorage.removeItem(BACKUP_KEY);
+        localStorage.setItem(KEY, JSON.stringify(state));
+      } catch (err2) {
+        ok = false;
+        if (Store.onSaveError) Store.onSaveError(err2);
+      }
     }
+    if (ok) markWritten();
     // Avisa a cloud.js para que suba los cambios. Los guardados "silenciosos"
     // (los que vienen de la nube) no lo disparan, para no generar un ciclo.
     if (!silent && Store.onCommit) Store.onCommit();
     return ok;
   }
 
-  /** Copia de seguridad local del estado actual (antes de sobrescribirlo). */
-  function backup() {
-    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); } catch (e) { /* nada */ }
+  /** ¿Esta pestaña puede guardar? No, si otra tomó el control o guardó después que esta. */
+  function canWrite() {
+    if (active) {
+      let rev = null;
+      try { rev = localStorage.getItem(REV_KEY); } catch (e) { return true; }
+      if (rev === lastRev) return true;
+    }
+    if (active) { active = false; if (Store.onInactive) Store.onInactive(); }
+    return false;
   }
 
-  /** Carga el seed: primero rutina.json por fetch; si no se puede (por ej. al
-   *  abrir index.html con file://), usa seed.js (copia idéntica). */
+  /** Deja la marca de "guardé yo, versión N". */
+  function markWritten() {
+    const rev = tabId + ':' + (++revN);
+    try { localStorage.setItem(REV_KEY, rev); lastRev = rev; } catch (e) {
+      try { lastRev = localStorage.getItem(REV_KEY); } catch (e2) { /* nada */ }
+    }
+  }
+
+  /** Esta pestaña pasa a ser la que guarda (se abrió, se volvió a ella o se tocó el aviso).
+   *  Si otra guardó mientras tanto, recarga esos datos. Devuelve true si recargó. */
+  function claimTab() {
+    let rev = null, raw = null;
+    try { rev = localStorage.getItem(REV_KEY); raw = localStorage.getItem(KEY); } catch (e) { /* nada */ }
+    let reloaded = false;
+    if (rev !== lastRev && raw) {
+      try { state = normalize(JSON.parse(raw)); reloaded = true; } catch (e) { /* se queda con lo que tiene */ }
+    }
+    lastRev = rev;
+    active = true;
+    try { localStorage.setItem(TAB_KEY, tabId + ':' + Date.now()); } catch (e) { /* nada */ }
+    return reloaded;
+  }
+
+  // Otra pestaña tomó el control: esta queda en pausa (deja de guardar) hasta que se vuelva a usar.
+  global.addEventListener('storage', (e) => {
+    if (e.key === TAB_KEY && e.newValue && e.newValue.split(':')[0] !== tabId && active) {
+      active = false;
+      if (Store.onInactive) Store.onInactive();
+    }
+  });
+
+  /** Copias automáticas guardadas: [{ at, reason, owner, state }], la más nueva primero.
+   *  Acepta el formato viejo (una sola copia = el estado crudo). */
+  function readBackups() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(BACKUP_KEY));
+      if (Array.isArray(raw)) return raw.filter((b) => b && b.state);
+      if (raw && raw.routine) return [{ at: 0, reason: '', owner: null, state: raw }];
+    } catch (e) { /* nada */ }
+    return [];
+  }
+
+  /** Copia de seguridad local del estado actual (antes de sobrescribirlo). Se guardan las últimas
+   *  MAX_BACKUPS, así una segunda operación no pisa la copia de la primera. reason: 'import' |
+   *  'reset-routine' | 'cuenta' | 'nube' | 'recuperar'. owner = la cuenta dueña de esos datos. */
+  function backup(reason) {
+    let owner = null;
+    try { owner = localStorage.getItem(OWNER_KEY); } catch (e) { /* nada */ }
+    const list = readBackups();
+    const snap = JSON.stringify(state);
+    if (list[0] && JSON.stringify(list[0].state) === snap) return;   // igual a la última copia: no se repite
+    list.unshift({ at: Date.now(), reason: reason || '', owner, state: JSON.parse(snap) });
+    // Si no entran todas, se guardan menos (se descartan las más viejas).
+    for (let n = Math.min(list.length, MAX_BACKUPS); n > 0; n--) {
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list.slice(0, n))); return; } catch (e) { /* probar con menos */ }
+    }
+  }
+
+  /** Resumen de las copias para mostrarlas en Datos (sin el estado completo). mine = es de la cuenta
+   *  actual (o de nadie): las de otra cuenta de este teléfono no se ofrecen, para no mezclar datos. */
+  const listBackups = () => {
+    let cur = null;
+    try { cur = localStorage.getItem(OWNER_KEY); } catch (e) { /* nada */ }
+    return readBackups().map((b) => ({
+      at: b.at, reason: b.reason, mine: !b.owner || b.owner === cur,
+      sessions: Array.isArray(b.state.sessions) ? b.state.sessions.filter((s) => s && s.finished !== false).length : 0,
+      days: b.state.routine && Array.isArray(b.state.routine.days) ? b.state.routine.days.length : 0,
+    }));
+  };
+
+  /** Vuelve a una copia automática. Lo que había queda, a su vez, como copia (se puede volver atrás). */
+  function restoreBackup(at) {
+    const i = readBackups().findIndex((x) => x.at === at);
+    const b = readBackups()[i];
+    if (!b || !listBackups()[i].mine) return false;     // nunca se cargan datos de otra cuenta
+    const next = normalize(b.state);
+    backup('recuperar');
+    state = next;
+    commit();                                  // si hay sesión iniciada, se sube a la nube
+    return true;
+  }
+
+  /** Carga la rutina de ejemplo (la de quien instala la app por primera vez): primero ejemplo.json
+   *  por fetch; si no se puede (por ej. al abrir index.html con file://), su copia en seed.js.
+   *  rutina.json (la rutina de Bryan) ya no se carga sola: queda en la nube de cada uno. */
   async function loadSeed() {
     try {
-      const res = await fetch('rutina.json', { cache: 'no-store' });
+      const res = await fetch('ejemplo.json', { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return await res.json();
     } catch (e) {
-      if (global.SEED_DATA) return global.SEED_DATA;
-      throw new Error('No se pudo cargar rutina.json.');
+      if (global.EXAMPLE_DATA) return global.EXAMPLE_DATA;
+      throw new Error('No se pudo cargar la rutina de ejemplo.');
     }
   }
 
   /** Inicializa: lee localStorage o, en el primer inicio, carga el seed. */
   async function init() {
     let raw = null;
-    try { raw = localStorage.getItem(KEY); } catch (e) { /* sin acceso */ }
+    try { raw = localStorage.getItem(KEY); lastRev = localStorage.getItem(REV_KEY); } catch (e) { /* sin acceso */ }
+    try { localStorage.setItem(TAB_KEY, tabId + ':' + Date.now()); } catch (e) { /* nada */ }   // ahora escribe esta
     if (raw) {
       try {
         state = normalize(JSON.parse(raw));
@@ -592,7 +702,7 @@
    *  de la rutina ACTUAL; cuando están todos, cuenta 1 ciclo y reinicia el acumulado.
    *  El volumen del ciclo suma todas las sesiones hechas en ese tramo. */
   function cycles() {
-    const dayIds = state.routine.days.map((d) => d.id);
+    const dayIds = state.routine.days.filter((d) => d.exercises.length).map((d) => d.id);   // un día vacío no se puede "hacer"
     const total = dayIds.length;
     const list = [];
     if (!total) return { complete: 0, current: 0, total: 0, list };
@@ -789,6 +899,17 @@
 
   const exportJSON = () => JSON.stringify(state, null, 2);
 
+  /* Recordatorio de backup: cuántas sesiones terminadas había al último "Exportar backup". */
+  const EXPORT_KEY = 'gymapp.lastExport';
+  const finishedCount = () => state.sessions.filter((s) => s.finished).length;
+  function markExported() { try { localStorage.setItem(EXPORT_KEY, String(finishedCount())); } catch (e) { /* nada */ } }
+  /** Sesiones terminadas desde el último backup exportado (todas, si nunca se exportó). */
+  function sessionsSinceExport() {
+    let n = 0;
+    try { n = Number(localStorage.getItem(EXPORT_KEY)) || 0; } catch (e) { /* nada */ }
+    return Math.max(0, finishedCount() - n);
+  }
+
   /** Valida el texto y devuelve el estado limpio SIN aplicarlo (para confirmar antes). */
   function parseImport(text) {
     let data;
@@ -797,16 +918,16 @@
   }
 
   /** Reemplaza todo el estado (guardando antes un respaldo del actual). */
-  function replaceAll(newState) {
-    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); } catch (e) { /* nada */ }
+  function replaceAll(newState, reason) {
+    backup(reason || 'import');
     state = newState;
     commit();
   }
 
-  /** Restaura solo la rutina original conservando el historial. */
+  /** Vuelve a la rutina de ejemplo conservando el historial. */
   async function resetRoutine() {
     const seed = normalize(await loadSeed());
-    replaceAll(Object.assign({}, state, { routine: seed.routine }));
+    replaceAll(Object.assign({}, state, { routine: seed.routine }), 'reset-routine');
   }
 
   /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
@@ -841,7 +962,7 @@
 
   /** Vuelve al estado inicial (otra persona inició sesión en este dispositivo). */
   async function resetToSeed() {
-    backup();
+    backup('cuenta');
     state = normalize(await loadSeed());
     commit(true);
   }
@@ -906,6 +1027,7 @@
   const Store = {
     init, commit, uid, normName, parseNum, todayStr,
     get state() { return state; },
+    claimTab, isActive: () => active,
     sessions: sortedSessions,
     find,
     addDay, deleteDay, moveDay,
@@ -917,14 +1039,15 @@
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
-    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV,
-    backup, setRoutine, upsertSession, removeSession, resetToSeed,
+    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport,
+    backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
     parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */
     canonSession: (x) => { const { updatedAt, ...rest } = normSession(x); return rest; },
     canonRoutine: (r) => normalize({ routine: r }).routine,
     normComments,
     onSaveError: null,
+    onInactive: null,      // otra pestaña o ventana tomó el control (lo asigna app.js)
     onCommit: null,        // lo asigna cloud.js
   };
   global.Store = Store;

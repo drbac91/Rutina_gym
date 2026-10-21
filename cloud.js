@@ -31,6 +31,7 @@
     status: 'off',          // off | syncing | synced | offline | error
     lastError: '',
     skipped: false,
+    deniedEmail: '',        // cuenta que entró pero no está habilitada en la nube (se cerró su sesión)
     onChange: null,         // la UI se entera de cambios de login/estado
     onRemote: null,         // la UI se entera de datos nuevos de la nube
     confirm: (msg) => global.confirm(msg),
@@ -111,7 +112,7 @@
     del: (k) => { try { localStorage.removeItem(k); } catch (e) { /* nada */ } },
   };
   const loadPushed = () => { try { return JSON.parse(store.get(PUSHED_KEY)) || {}; } catch (e) { return {}; } };
-  const savePushed = () => store.set(PUSHED_KEY, JSON.stringify(pushed));
+  const savePushed = () => { if (S.isActive()) store.set(PUSHED_KEY, JSON.stringify(pushed)); };   // la pestaña en pausa no escribe
 
   const base = () => db.collection('users').doc(uid);
   const routineRef = () => base().collection('routine').doc('main');
@@ -198,6 +199,13 @@
     notify();
   };
 
+  /** Esta pestaña vuelve a ser la que se usa (había otra abierta): relee lo ya subido y sube lo que falte. */
+  Cloud.resume = function () {
+    if (!Cloud.user) return;
+    pushed = loadPushed();
+    schedulePush();
+  };
+
   /** Fuerza la subida inmediata (la usa la app al cerrar sesión). */
   Cloud.flush = () => pushDiff();
 
@@ -206,6 +214,13 @@
   async function startSync(user) {
     stopSync();
     uid = user.uid;
+    // Antes de tocar los datos de este dispositivo, se confirma que la cuenta esté habilitada en la
+    // nube (firestore.rules). Si no lo está, se cierra su sesión y los datos locales quedan intactos.
+    // Sin conexión no se puede saber: se sigue y, si después la nube la rechaza, onListenError la saca.
+    try { await routineRef().get(); } catch (e) {
+      if (e.code === 'permission-denied') { await deny(user); return; }
+    }
+    Cloud.deniedEmail = '';
     Cloud.user = { uid: user.uid, email: user.email || '', name: user.displayName || '' };
     Cloud.skipped = false;
     store.del(SKIP_KEY);
@@ -261,8 +276,17 @@
     refreshStatus();
   }
 
+  /** Cuenta no habilitada: se cierra su sesión sin tocar los datos locales y la app avisa. */
+  async function deny(user) {
+    Cloud.deniedEmail = (user && user.email) || 'Esta cuenta';
+    stopSync();
+    try { await auth.signOut(); } catch (e) { /* nada */ }
+    notify();
+  }
+
   function onListenError(err) {
     console.error('Firestore:', err);
+    if (err.code === 'permission-denied' && auth.currentUser) { deny(auth.currentUser); return; }
     hadError = true;
     Cloud.lastError = err.code === 'permission-denied'
       ? 'Esta cuenta no tiene permiso para guardar datos.'
@@ -346,14 +370,14 @@
 
     if (!dirty) {
       take = remoteNewer;
-    } else if (global.SEED_DATA && sig(st.routine) === sig(global.SEED_DATA.routine)) {
+    } else if ([global.SEED_DATA, global.EXAMPLE_DATA].some((d) => d && sig(st.routine) === sig(d.routine))) {
       take = true;                                       // rutina de fábrica sin tocar: gana la de la nube
     } else if ((Number(st.routineUpdatedAt) || 0) > 0) {
       take = false;                                      // ya sincronizada antes y editada acá: gana lo local
     } else {
       // Rutina personalizada que nunca se subió y la nube ya tiene otra: preguntar.
       take = Cloud.confirm('En la nube ya hay una rutina guardada y en este dispositivo hay otra distinta.\n\nAceptar = usar la de la nube\nCancelar = quedarse con la de este dispositivo y subirla');
-      if (take) S.backup();
+      if (take) S.backup('nube');
     }
     if (!take) return false;
     S.setRoutine(data.routine, data.weightUnit, data.updatedAt, data.exerciseComments, data.bodyweights);   // sin el campo, se conservan los locales
@@ -400,7 +424,7 @@
   /** Sube solo lo que cambió desde la última vez. */
   function pushDiff() {
     clearTimeout(pushTimer);
-    if (!Cloud.user || !reconciled) return;
+    if (!Cloud.user || !reconciled || !S.isActive()) return;   // en pausa: sube la pestaña que se está usando
     const st = S.state;
     const ops = [];                                      // { key, ref, data } | { key, ref, del:true }
     const now = Date.now();
