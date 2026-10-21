@@ -693,32 +693,67 @@
   const sessionVolume = (s) => s.exercises.reduce((a, ex) =>
     a + ex.sets.filter((st) => st.done).reduce((b, st) => b + setVolume(st), 0), 0);
 
-  /** Sesiones terminadas de un día de rutina, en orden: [{ date, volume }]. */
-  const dayVolumes = (dayId) => sortedSessions()
-    .filter((s) => s.finished && s.dayId === dayId)
-    .map((s) => ({ date: s.date, volume: round2(sessionVolume(s)) }));
+  /** ¿La sesión es de ese día de la rutina? Por identificador o, si no coincide (rutina reimportada
+   *  con otros identificadores), por el nombre del día. */
+  const isDay = (s, day) => s.dayId === day.id || (!!s.dayName && normName(s.dayName) === normName(day.name));
 
-  /** Ciclos completos: recorre las sesiones terminadas en orden y acumula los días distintos
-   *  de la rutina ACTUAL; cuando están todos, cuenta 1 ciclo y reinicia el acumulado.
-   *  El volumen del ciclo suma todas las sesiones hechas en ese tramo. */
+  /** Sesiones terminadas de un día de rutina, en orden: [{ date, volume }]. */
+  const dayVolumes = (dayId) => {
+    const day = find(state.routine.days, dayId);
+    return sortedSessions()
+      .filter((s) => s.finished && (day ? isDay(s, day) : s.dayId === dayId))
+      .map((s) => ({ date: s.date, volume: round2(sessionVolume(s)) }));
+  };
+
+  /** Por cada día de la rutina: última vez que se hizo ({ date, order } u null) y cuántas veces en
+   *  los últimos `days` días. `order` = posición en el historial, para saber cuál se hizo antes. */
+  function dayStats(days) {
+    const fin = sortedSessions().filter((s) => s.finished), from = daysAgoStr(days || 28);
+    const out = {};
+    state.routine.days.forEach((d) => {
+      let last = null, recent = 0;
+      fin.forEach((s, i) => { if (isDay(s, d)) { last = { date: s.date, order: i }; if (s.date >= from) recent++; } });
+      out[d.id] = { last, recent };
+    });
+    return out;
+  }
+
+  /** Ciclos: una vuelta por todos los días de la rutina, en cualquier orden. Se recorren las sesiones
+   *  terminadas y el ciclo se cierra cuando:
+   *   - ya estuvieron todos los días → completo;
+   *   - se repite un día que ya estaba → incompleto (faltaron días; quedan en `missing`).
+   *  Así un día salteado no deja el ciclo abierto para siempre, y si después se edita la rutina los
+   *  límites de los ciclos viejos no cambian (solo qué días figuran como faltantes).
+   *  El volumen del ciclo suma todas sus sesiones. */
   function cycles() {
-    const dayIds = state.routine.days.filter((d) => d.exercises.length).map((d) => d.id);   // un día vacío no se puede "hacer"
-    const total = dayIds.length;
+    const days = state.routine.days.filter((d) => d.exercises.length);   // un día vacío no se puede "hacer"
+    const total = days.length;
     const list = [];
-    if (!total) return { complete: 0, current: 0, total: 0, list };
+    if (!total) return { complete: 0, incomplete: 0, current: 0, total: 0, list, missing: [], since: null };
+    const keyOf = (s) => { const d = days.find((x) => isDay(s, x)); return d ? d.id : 'x:' + (normName(s.dayName) || s.dayId); };
     let acc = new Set(), tramo = [];
+    const close = () => {
+      const volume = round2(tramo.reduce((a, x) => a + sessionVolume(x), 0));
+      // Ninguna sesión es de un día de la rutina actual: es de una rutina anterior (no se le "piden" días nuevos).
+      const old = !days.some((d) => acc.has(d.id));
+      const missing = old ? [] : days.filter((d) => !acc.has(d.id)).map((d) => d.name);
+      list.push({ n: list.length + 1, start: tramo[0].date, end: tramo[tramo.length - 1].date, sessions: tramo.length,
+                  volume, avg: round2(volume / tramo.length), complete: !missing.length, missing, old });
+      acc = new Set(); tramo = [];
+    };
     sortedSessions().forEach((s) => {
       if (!s.finished) return;
-      tramo.push(s);
-      if (dayIds.includes(s.dayId)) acc.add(s.dayId);
-      if (acc.size === total) {
-        const volume = round2(tramo.reduce((a, x) => a + sessionVolume(x), 0));
-        list.push({ n: list.length + 1, start: tramo[0].date, end: s.date,
-                    sessions: tramo.length, volume, avg: round2(volume / tramo.length) });
-        acc = new Set(); tramo = [];
-      }
+      const k = keyOf(s);
+      if (acc.has(k)) close();                             // se repitió un día: el ciclo anterior queda incompleto
+      acc.add(k); tramo.push(s);
+      if (days.every((d) => acc.has(d.id))) close();       // ya estuvieron todos: completo
     });
-    return { complete: list.length, current: acc.size, total, list };
+    return {
+      complete: list.filter((c) => c.complete && !c.old).length, incomplete: list.filter((c) => !c.complete).length,
+      current: days.filter((d) => acc.has(d.id)).length, total, list,
+      missing: tramo.length ? days.filter((d) => !acc.has(d.id)).map((d) => d.name) : [],   // lo que falta del ciclo en curso
+      since: tramo.length ? tramo[0].date : null,
+    };
   }
 
   /* ---------- métricas de Progreso ---------- */
@@ -846,6 +881,8 @@
         mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
       });
     });
+    // Músculos que la rutina trabaja y esa semana no tuvieron series: van al final, en 0 (para ver el desequilibrio).
+    mm.forEach((mu) => [...mu.primary, ...mu.secondary].forEach((x) => { if (!tot.has(x)) tot.set(x, 0); }));
     return { list: [...tot].map(([muscle, sets]) => ({ muscle, sets: round2(sets) })).sort((a, b) => b.sets - a.sets), unassigned };
   }
 
@@ -989,7 +1026,17 @@
     const days = data && (data.routine ? data.routine.days : data.days);
     if (!Array.isArray(days) || !days.length) throw new Error('No encontré días de rutina ("routine.days") en el JSON.');
     if (!days.every((d) => d && Array.isArray(d.exercises))) throw new Error('Cada día tiene que tener una lista "exercises".');
-    return normalize({ routine: { days } }).routine;
+    // Un día sin identificador que se llama igual que uno actual conserva su identificador: así no se
+    // desconectan del historial los ciclos ni el gráfico por día.
+    const used = new Set(days.map((d) => d.id).filter(Boolean));
+    const withIds = days.map((d) => {
+      if (d.id) return d;
+      const same = state.routine.days.find((x) => normName(x.name) === normName(d.name) && !used.has(x.id));
+      if (!same) return d;
+      used.add(same.id);
+      return Object.assign({}, d, { id: same.id });
+    });
+    return normalize({ routine: { days: withIds } }).routine;
   }
 
   /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer. */
@@ -1046,7 +1093,7 @@
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
     bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
-    bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
+    bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref,

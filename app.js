@@ -131,13 +131,19 @@
   }
 
   /** Día sugerido: el siguiente al de la última sesión terminada. */
-  function suggestedDayId() {
-    const days = S.state.routine.days;
-    const last = S.sessions().filter((s) => s.finished).pop();
-    if (!last || !days.length) return days[0] && days[0].id;
-    const i = days.findIndex((d) => d.id === last.dayId);
-    return days[(i + 1) % days.length].id;
+  /** Día sugerido: el que hace más tiempo que no se hace (uno que nunca se hizo va primero, en el orden
+   *  de la rutina). Con una rotación normal coincide con "el siguiente"; si se saltea un día, lo propone. */
+  function suggestedDayId(stats) {
+    const days = S.state.routine.days.filter((d) => d.exercises.length);
+    if (!days.length) return S.state.routine.days[0] && S.state.routine.days[0].id;
+    const st = stats || S.dayStats();
+    const order = (d) => (st[d.id].last ? st[d.id].last.order : -1);
+    return days.slice().sort((a, b) => order(a) - order(b))[0].id;
   }
+
+  /** "hoy" · "ayer" · "hace 5 días" para una fecha "AAAA-MM-DD". */
+  const daysAgo = (date) => Math.round((toDate(S.todayStr()) - toDate(date)) / 864e5);
+  const agoText = (date) => { const n = daysAgo(date); return n <= 0 ? 'hoy' : n === 1 ? 'ayer' : `hace ${n} días`; };
 
   function viewTrain() {
     const s = currentSession();
@@ -147,10 +153,15 @@
   function trainPicker() {
     const days = S.state.routine.days;
     if (!days.length) return '<h1>Entrenar</h1><p class="empty">No hay días en la rutina. Creá uno en la pestaña Rutina.</p>';
-    const next = suggestedDayId();
+    const stats = S.dayStats();
+    const next = suggestedDayId(stats);
+    const trained = S.state.sessions.some((s) => s.finished);
+    // Debajo de cada día, cuándo se hizo por última vez (así se ve qué día quedó atrás).
+    const when = (d) => (!trained ? '' : stats[d.id].last
+      ? ` · ${agoText(stats[d.id].last.date)}` : ' · <span class="warn-txt">nunca</span>');
     return `<h1>¿Qué día entrenás?</h1>${exampleNote()}` + days.map((d) => `
       <button class="day-btn block ${d.id === next ? 'primary' : ''}" style="margin-bottom:10px" data-act="start" data-day="${esc(d.id)}">
-        <span>${esc(d.name)}<small>${d.exercises.length} ejercicios</small></span>
+        <span>${esc(d.name)}<small>${d.exercises.length} ejercicios${when(d)}</small></span>
         <span>${d.id === next ? 'Sugerido hoy ▸' : '▸'}</span>
       </button>`).join('');
   }
@@ -692,7 +703,7 @@
     const { list, unassigned } = S.muscleSets(ui.progWeek);
     const max = Math.max(1, ...list.map((x) => x.sets));
     const rows = list.map((x) => `
-        <div class="mrow"><span class="mname">${esc(x.muscle)}</span>
+        <div class="mrow ${x.sets ? '' : 'zero'}"><span class="mname">${esc(x.muscle)}</span>
           <span class="mbar"><i style="width:${Math.round((x.sets / max) * 100)}%"></i></span>
           <b>${fmt(x.sets)}</b></div>`).join('');
     return `
@@ -702,6 +713,7 @@
         <select id="p-week" data-f="progweek">${weeks.map((w) =>
           `<option value="${esc(w)}" ${w === ui.progWeek ? 'selected' : ''}>Semana del ${esc(fmtShort(w))}</option>`).join('')}</select>
         ${rows ? `<div class="mlist">${rows}</div>` : '<p class="muted chart-empty">Ningún ejercicio de esa semana tiene músculos asignados. Asignalos en Rutina (abrí cada ejercicio).</p>'}
+        ${list.some((x) => !x.sets) ? '<p class="muted"><span class="warn-txt">En naranja:</span> músculos de tu rutina que esa semana no entrenaste.</p>' : ''}
         ${unassigned ? `<p class="muted">${unassigned} serie(s) de ejercicios sin músculos asignados no se cuentan.</p>` : ''}
         <p class="muted">Músculo principal = 1 serie · secundario = ${fmt(S.SECONDARY_MUSCLE_FACTOR)}.</p>
       </div>`;
@@ -770,14 +782,33 @@
   /** Resumen de ciclos: un ciclo = hiciste todos los días de la rutina actual. */
   function cyclesCard() {
     const c = S.cycles();
+    const stats = S.dayStats(28);
+    const days = S.state.routine.days.filter((d) => d.exercises.length);
+    const trained = S.state.sessions.some((s) => s.finished);
+    // Lo que falta del ciclo en curso y desde cuándo está abierto.
+    const open = c.since ? daysAgo(c.since) : 0;
+    const lastTxt = (d) => (stats[d.id].last ? agoText(stats[d.id].last.date) : 'nunca');
+    const missDays = c.current ? days.filter((d) => c.missing.includes(d.name)) : [];
+    const missing = missDays.length ? `
+        <div class="note revisar">Falta en este ciclo: ${missDays.map((d) => `<b>${esc(d.name)}</b> (última vez: ${esc(lastTxt(d))})`).join(', ')}${open > 14 ? ` · el ciclo empezó ${esc(agoText(c.since))}` : ''}.</div>` : '';
+    // Otros días que quedaron atrás: hace más de 14 días que no se hacen (o nunca).
+    const behind = trained ? days.filter((d) => !missDays.includes(d) && (!stats[d.id].last || daysAgo(stats[d.id].last.date) > 14)) : [];
+    const behindTxt = behind.length ? `<p class="muted"><span class="warn-txt">Sin hacer hace más de 2 semanas:</span> ${behind.map((d) =>
+      `${esc(d.name)} (${esc(lastTxt(d))})`).join(' · ')}</p>` : '';
+    const perDay = trained ? `<p class="muted">Últimas 4 semanas: ${days.map((d) => {
+      const n = stats[d.id].recent;
+      return `${esc(d.name)} <b class="${n ? '' : 'warn-txt'}">×${n}</b>`;
+    }).join(' · ')}</p>` : '';
     return `
       <div class="card">
         <h2>Ciclos</h2>
-        <div class="stats two">
-          <div class="stat"><b>${c.complete}</b><span>Ciclos completos: ${c.complete}</span></div>
-          <div class="stat"><b>${c.current}/${c.total}</b><span>Ciclo en curso: ${c.current} de ${c.total} días</span></div>
+        <div class="stats">
+          <div class="stat"><b>${c.complete}</b><span>Completos</span></div>
+          <div class="stat"><b class="${c.incomplete ? 'warn-txt' : ''}">${c.incomplete}</b><span>Incompletos</span></div>
+          <div class="stat"><b>${c.current}/${c.total}</b><span>En curso</span></div>
         </div>
-        <p class="muted">Un ciclo se completa cuando hacés todos los días de tu rutina${c.total ? ` (${c.total})` : ''}, en cualquier orden.</p>
+        ${missing}${behindTxt}${perDay}
+        <p class="muted">Un ciclo es una vuelta por todos los días de tu rutina${c.total ? ` (${c.total})` : ''}, en cualquier orden. Si repetís un día antes de hacerlos todos, ese ciclo se cierra como incompleto.</p>
       </div>`;
   }
 
@@ -807,7 +838,8 @@
       <div class="card">
         <h2>Volumen por ciclo</h2>
         ${list.length ? '<div class="svgchart" data-chart="cycle"></div>'
-          : '<p class="muted chart-empty">Todavía no completaste ningún ciclo. Cuando hagas todos los días de tu rutina vas a ver acá el volumen de cada ciclo.</p>'}
+          : '<p class="muted chart-empty">Todavía no se cerró ningún ciclo. Se cierra al hacer todos los días de tu rutina, o al repetir uno antes de terminarlos (incompleto).</p>'}
+        ${list.some((c) => !c.complete) ? '<p class="muted"><span class="warn-txt">■</span> Barra naranja = ciclo incompleto (faltó algún día). Debajo de cada ciclo, cuántas sesiones tuvo.</p>' : ''}
       </div>`;
   }
 
@@ -817,9 +849,9 @@
 
   /** Gráfico de barras (+ línea opcional en eje derecho) en SVG propio, al ancho exacto del contenedor.
    *  Usa los mismos colores del gráfico por ejercicio: barras grises, línea azul. */
-  function svgChart({ labels, bars, line, barName, lineName, titles, width }) {
-    const W = Math.max(240, Math.floor(width)), H = 230;
-    const padL = 40, padR = line ? 40 : 10, padT = 30, padB = 30;
+  function svgChart({ labels, bars, line, barName, lineName, titles, width, barCls, sub }) {
+    const W = Math.max(240, Math.floor(width)), H = sub ? 242 : 230;
+    const padL = 40, padR = line ? 40 : 10, padT = 30, padB = sub ? 42 : 30;
     const iw = W - padL - padR, ih = H - padT - padB, n = labels.length;
     const nice = (v) => {
       if (!(v > 0)) return 1;
@@ -838,7 +870,7 @@
       if (line) g += `<text x="${W - padR + 6}" y="${y + 3.5}" class="ax acc">${shortNum(maxL * (1 - k / 4))}</text>`;
     }
     bars.forEach((v, i) => {
-      g += `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${yB(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(padT + ih - yB(v)).toFixed(1)}" rx="3" class="bar"><title>${esc(titles[i])}</title></rect>`;
+      g += `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${yB(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(padT + ih - yB(v)).toFixed(1)}" rx="3" class="bar ${barCls ? barCls[i] : ''}"><title>${esc(titles[i])}</title></rect>`;
     });
     if (line) {
       g += `<path d="${line.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + yL(v).toFixed(1)).join(' ')}" class="ln"/>`;
@@ -846,7 +878,10 @@
     }
     const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 48))));   // etiquetas sin pisarse
     labels.forEach((l, i) => {
-      if (i % every === 0 || i === n - 1) g += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="ax">${esc(l)}</text>`;
+      if (i % every === 0 || i === n - 1) {
+        g += `<text x="${x(i).toFixed(1)}" y="${H - (sub ? 22 : 10)}" text-anchor="middle" class="ax">${esc(l)}</text>`;
+        if (sub) g += `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="ax">${esc(sub[i])}</text>`;
+      }
     });
     let lg = `<circle cx="${padL + 4}" cy="12" r="4" class="bar"/><text x="${padL + 12}" y="16" class="lg">${esc(barName)}</text>`;
     if (line) lg += `<circle cx="${padL + 22 + barName.length * 6.2}" cy="12" r="4" class="pt"/><text x="${padL + 30 + barName.length * 6.2}" y="16" class="lg">${esc(lineName)}</text>`;
@@ -888,8 +923,10 @@
         const list = S.cycles().list;
         el.innerHTML = svgChart({
           width, labels: list.map((c) => 'C' + c.n), bars: list.map((c) => c.volume), line: list.map((c) => c.avg),
+          sub: list.map((c) => c.sessions + ' ses.'), barCls: list.map((c) => (c.complete ? '' : 'inc')),
           barName: 'Volumen del ciclo', lineName: 'Promedio por sesión',
-          titles: list.map((c) => `Ciclo ${c.n} (${fmtShort(c.start)}–${fmtShort(c.end)}): ${fmt(c.volume)} ${unit()} en ${c.sessions} sesiones · promedio ${fmt(c.avg)} ${unit()}`),
+          titles: list.map((c) => `Ciclo ${c.n} (${fmtShort(c.start)}–${fmtShort(c.end)}): ${fmt(c.volume)} ${unit()} en ${c.sessions} sesiones · promedio ${fmt(c.avg)} ${unit()}`
+            + (c.old ? ' · de una rutina anterior' : c.complete ? '' : ` · incompleto, faltó: ${c.missing.join(', ')}`)),
         });
       }
     });
