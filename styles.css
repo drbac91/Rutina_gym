@@ -106,6 +106,8 @@ button.small { min-height: 40px; padding: 0 12px; }
 button.icon { min-width: 46px; padding: 0; }
 button:disabled { opacity: .35; pointer-events: none; }
 .block { width: 100%; }
+button:has(.btn-sub) { padding-top: 10px; padding-bottom: 10px; }
+.btn-sub { display: block; font-size: .8125rem; font-weight: 400; margin-top: 2px; }
 
 input, select, textarea {
   width: 100%;
@@ -170,6 +172,8 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
   min-height: 72px; font-size: 1.1875rem; margin-bottom: 12px;
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
 }
+.day-btn > span:first-child { min-width: 0; }
+.day-btn > span:last-child { flex: none; margin-left: 12px; white-space: nowrap; font-size: 1rem; }
 .day-btn small { color: var(--muted); display: block; font-size: .875rem; font-weight: 400; margin-top: 2px; }
 .day-btn.primary { background: var(--accent); }
 .day-btn.primary small { color: inherit; opacity: .8; }
@@ -183,7 +187,7 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
 
 .set, .set-head {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 54px 44px 28px;
+  grid-template-columns: 18px minmax(0, 1fr) 54px 44px 34px;   /* la × queda separada del ✓ */
   gap: 5px; align-items: center;
 }
 .set { margin-bottom: 8px; }
@@ -203,7 +207,7 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
 .set .chk.pop { animation: pop .32s var(--ease-out); }
 @keyframes pop { from { transform: scale(.82); } to { transform: scale(1); } }
 .set.done input { opacity: .6; }
-.set .x { padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
+.set .x { justify-self: end; padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
 .set-head { color: var(--muted); font-size: .75rem; text-align: center; margin-bottom: 4px; letter-spacing: .02em; }
 
 /* ---------- historial ---------- */
@@ -233,7 +237,12 @@ details.exe.dragging .drag-handle { cursor: grabbing; }
 details.exe input, details.exe textarea { background: var(--card); }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .original { font-size: .8125rem; color: var(--muted); background: var(--card); border-radius: 10px; padding: 8px 12px; margin-top: 10px; }
-.day-name { font-weight: 600; }
+.day-name {                /* el lápiz avisa que el nombre del día se puede cambiar */
+  font-weight: 600; padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2398989f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 18px;
+}
+.back-day { display: block; margin: 14px 0 -18px; padding: 0; text-decoration: none; color: var(--accent); font-size: 1rem; }
 
 /* ---------- nube: indicador y login ---------- */
 #sync {
@@ -251,6 +260,9 @@ body.gate { padding-bottom: 16px; }
 .login .logo { font-size: 4rem; line-height: 1; }
 .login h1 { margin: 12px 0 8px; }
 .login p { margin: 8px 8px 28px; }
+.login .login-sub { margin: 8px 8px 0; font-size: .8125rem; }
+.login .err { margin: 0 8px 20px; }
+.help { font-size: .8125rem; margin: 4px 0 8px; }
 .link-btn { background: none; color: var(--muted); font-weight: 400; text-decoration: underline; min-height: 46px; margin-top: 6px; }
 .link-btn:active { background: none; }
 .err { color: var(--danger); font-size: .875rem; margin: 8px 0; }
@@ -266,6 +278,28 @@ body.gate { padding-bottom: 16px; }
   transition: transform .35s var(--ease-out), opacity .25s;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+#toast.act { white-space: nowrap; }
+#toast.show.act { pointer-events: auto; padding-right: 6px; }
+#toast button { min-height: 36px; margin-left: 10px; padding: 0 12px; border-radius: 99px; background: none; color: var(--accent); }
+
+/* ---------- ventana de opciones (al finalizar): sube desde abajo, al alcance del pulgar ---------- */
+.sheet-bg {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .5);
+  padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  animation: sheet-fade .2s ease-out both;
+}
+.sheet {
+  width: 100%; max-width: 608px; max-height: 100%; overflow-y: auto;
+  background: var(--card); border-radius: var(--radius); padding: 20px 16px 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+  animation: sheet-up .32s var(--ease-out) both;
+}
+.sheet .stack { margin-top: 16px; }
+@keyframes sheet-fade { from { opacity: 0; } }
+@keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } }
+.hint { margin: -4px 4px 14px; }
 
 /* ---------- cambio de pestaña: aparece con suavidad ---------- */
 #view.enter > * { animation: enter .32s var(--ease-out) both; }
@@ -289,7 +323,7 @@ body.gate { padding-bottom: 16px; }
 .setw { margin-bottom: 8px; }
 .setw .set { margin-bottom: 0; }
 .dropline {
-  display: grid; grid-template-columns: 18px minmax(0, 1fr) 54px 44px 28px;
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) 54px 44px 34px;
   gap: 5px; align-items: center; margin-top: 5px;
 }
 .dropline .arrow { color: var(--accent); text-align: center; font-size: 1.1rem; font-weight: 600; }
@@ -302,7 +336,7 @@ body.gate { padding-bottom: 16px; }
 .ex.superset { box-shadow: inset 3px 0 0 var(--accent); }
 .ex.superset.done { box-shadow: inset 0 0 0 1.5px var(--ok), inset 3px 0 0 var(--accent); }
 .ssset {
-  display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px 28px;
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px 34px;
   gap: 5px; align-items: center;
 }
 .ssset .n { color: var(--muted); text-align: center; font-size: .9375rem; font-variant-numeric: tabular-nums; }
@@ -322,7 +356,7 @@ body.gate { padding-bottom: 16px; }
 .ssset.done .chk { background: var(--ok); color: #fff; }
 .ssset .chk.pop { animation: pop .32s var(--ease-out); }
 .ssset.done input { opacity: .6; }
-.ssset .x { padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
+.ssset .x { justify-self: end; padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
 .setw:has(.ssset) { padding-bottom: 10px; margin-bottom: 10px; border-bottom: .5px solid var(--sep); }
 .setw:has(.ssset):last-of-type { border-bottom: 0; margin-bottom: 0; }
 
@@ -337,7 +371,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 
 /* ---------- barra: discos por lado + total calculado ---------- */
 .tot {
-  grid-column: 2; text-align: center; font-size: .75rem; font-weight: 600;
+  grid-column: 2; text-align: center; font-size: .8125rem; font-weight: 700;
   color: var(--accent); margin-top: -2px; font-variant-numeric: tabular-nums; letter-spacing: .01em;
 }
 .ssinputs .tot { grid-column: 1; }
@@ -396,3 +430,15 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .bwrow { display: grid; grid-template-columns: minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: .5px solid var(--sep); font-size: .9375rem; }
 .bwrow:last-child { border-bottom: 0; }
 .bwrow .x { min-height: 36px; padding: 0; background: none; color: var(--muted); font-size: 1.2rem; }
+
+/* ---------- pantallas angostas (iPhone SE, Android chicos): que el peso se lea entero ---------- */
+@media (max-width: 359px) {
+  main { padding-left: 12px; padding-right: 12px; }
+  .card { padding: 14px 12px; }
+  .set, .set-head, .dropline { grid-template-columns: 14px minmax(0, 1fr) 46px 44px 32px; gap: 4px; }
+  .ssset { grid-template-columns: 14px minmax(0, 1fr) 44px 32px; gap: 4px; }
+  .ssinputs { grid-template-columns: minmax(0, 1fr) 46px; gap: 4px; }
+  .stepper button, .ssset .stepper button { min-width: 30px; width: 30px; }
+  .stepper input, .ssset .stepper input { margin: 0 2px; font-size: 1rem; }
+  .ex .row button { padding: 0 8px; font-size: 1rem; }   /* "✓ Completar" en una sola línea */
+}

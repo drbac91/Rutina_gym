@@ -40,12 +40,54 @@
   const haptic = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* nada */ } };
 
   let toastTimer;
-  function toast(msg) {
+  /** Aviso breve abajo. Con action ({ label, fn }) suma un botón (ej.: "Deshacer") y dura más. */
+  function toast(msg, action) {
     const t = document.getElementById('toast');
     t.textContent = msg;
+    t.classList.toggle('act', !!action);
+    if (action) {
+      const b = document.createElement('button');
+      b.textContent = action.label;
+      b.onclick = () => { clearTimeout(toastTimer); t.classList.remove('show'); action.fn(); };
+      t.appendChild(b);
+    }
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+    toastTimer = setTimeout(() => t.classList.remove('show'), action ? 5000 : 2600);
+  }
+
+  /** Por encima de esto, antes de marcar se pregunta "¿seguro?" (casi siempre es un error de tipeo). */
+  const MAX_KG = 400, MAX_REPS = 100;
+  /** "1.000" / "2.500": punto de miles, que se leería como 1 kg. Se rechaza: los decimales van con coma. */
+  const isThousands = (txt) => /^\d{1,3}\.\d{3}$/.test(String(txt || '').trim());
+
+  /** Ventana con varias opciones (para cuando confirm(), con solo Aceptar/Cancelar, no alcanza).
+   *  options: [{ label, value, cls }]. Devuelve una promesa con el value elegido, o null si se
+   *  cierra sin elegir (tocar afuera o Esc). Los toques del primer instante se ignoran: así un
+   *  doble toque en el botón que la abrió no elige una opción sin querer. */
+  function choose(title, html, options) {
+    return new Promise((resolve) => {
+      const opened = Date.now();
+      const box = document.createElement('div');
+      box.className = 'sheet-bg';
+      box.innerHTML = `
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-t">
+          <h2 id="sheet-t">${esc(title)}</h2>
+          ${html ? `<p class="muted">${html}</p>` : ''}
+          <div class="stack">${options.map((o, i) =>
+            `<button class="block ${o.cls || ''}" data-i="${i}">${esc(o.label)}</button>`).join('')}</div>
+        </div>`;
+      const close = (v) => { document.removeEventListener('keydown', key, true); box.remove(); resolve(v); };
+      const key = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); close(null); } };
+      box.addEventListener('click', (ev) => {
+        if (Date.now() - opened < 450) return;
+        const b = ev.target.closest('button[data-i]');
+        if (b) close(options[+b.dataset.i].value);
+        else if (ev.target === box) close(null);
+      });
+      document.addEventListener('keydown', key, true);
+      document.body.appendChild(box);
+    });
   }
 
   /** Descarga un archivo generado en el navegador. */
@@ -97,12 +139,24 @@
     const days = S.state.routine.days;
     if (!days.length) return '<h1>Entrenar</h1><p class="empty">No hay días en la rutina. Creá uno en la pestaña Rutina.</p>';
     const next = suggestedDayId();
-    return `<h1>¿Qué día entrenás?</h1>` + days.map((d) => `
+    return `<h1>¿Qué día entrenás?</h1>${exampleNote()}` + days.map((d) => `
       <button class="day-btn block ${d.id === next ? 'primary' : ''}" style="margin-bottom:10px" data-act="start" data-day="${esc(d.id)}">
         <span>${esc(d.name)}<small>${d.exercises.length} ejercicios</small></span>
-        <span>${d.id === next ? 'Toca hoy ▸' : '▸'}</span>
+        <span>${d.id === next ? 'Sugerido hoy ▸' : '▸'}</span>
       </button>`).join('');
   }
+
+  /** ¿La rutina es todavía la de fábrica (ejemplo.json, o rutina.json en instalaciones viejas) y nunca
+   *  se entrenó? Compara días y ejercicios por nombre. */
+  function isExampleRoutine() {
+    if (S.state.sessions.some((s) => s.finished)) return false;
+    const sig = (days) => JSON.stringify(days.map((d) => d.exercises.map((e) => S.normName(e.name))));
+    const mine = sig(S.state.routine.days);
+    return [window.EXAMPLE_DATA, window.SEED_DATA].some((d) => d && sig(d.routine.days) === mine);
+  }
+  const exampleNote = () => (isExampleRoutine()
+    ? `<div class="note"><b>Esta es una rutina de ejemplo.</b> Cambiala en la pestaña Rutina o cargá la tuya en Datos → Importar rutina. Tocá un día para empezar a anotar.</div>`
+    : '');
 
   /** Texto "Última vez (fecha · otro día): series" de un ejercicio. */
   function prevText(s, ex) {
@@ -125,11 +179,12 @@
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
+        ${ex.drop ? '<p class="muted help">↳ Drop set: cada serie tiene una segunda parte sin descanso, con menos peso.</p>' : ''}
         <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps · RIR</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Deshacer' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
         ${commentBox(ex)}
@@ -149,7 +204,7 @@
         if (!st) return '';
         return `
           <div class="ssline" data-ex="${i}">
-            <span class="ssname">${esc(s.exercises[i].name)}${{ bar: ' · discos por lado', bricks: ' · bloques', plain: '' }[loadMode(s.exercises[i])]}</span>
+            <span class="ssname">${esc(s.exercises[i].name)}${{ bar: ' · discos de UN lado', bricks: ' · cantidad de bloques', plain: '' }[loadMode(s.exercises[i])]}</span>
             <div class="ssinputs">
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
@@ -174,13 +229,14 @@
     return `
       <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
         <div class="ex-head"><h3>Superserie</h3><span class="target">${exs.map(targetText).join(' + ')}</span></div>
+        <p class="muted help">Hacé una serie de cada ejercicio, uno tras otro, y recién ahí descansá. El ✓ marca la vuelta completa.</p>
         ${notes}
         ${prevs}
         ${idxs.map((i) => barPicker(s.exercises[i], i, s.exercises[i].name)).join('')}
         ${rows.join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Deshacer' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         ${exs.map((e) => commentBox(e, true)).join('')}
       </section>`;
@@ -191,12 +247,27 @@
     const exCards = S.groupRuns(s.exercises).map((idxs) =>
       idxs.length > 1 ? supersetCard(s, idxs) : exerciseCard(s, s.exercises[idxs[0]], idxs[0])).join('');
 
+    const anyDone = s.exercises.some((ex) => ex.sets.some((st) => st.done));
+    // Se tocó un día por error: mientras no haya nada marcado se puede volver a elegir, sin preguntar.
+    const back = !editing && !anyDone ? '<button class="link-btn back-day" data-act="change-day">← Elegir otro día</button>' : '';
+    // Quedó abierta desde otro día (se cerró la app a mitad de sesión).
+    const stale = !editing && s.date < S.todayStr() ? `
+      <div class="note revisar">Esta sesión empezó el <b>${esc(fmtDate(s.date))}</b> y no la terminaste.
+        <div class="row" style="margin-top:8px">
+          <button data-act="finish">Terminarla</button>
+          <button data-act="session-today">Seguir hoy</button>
+        </div>
+      </div>` : '';
     return `
+      ${back}
       <h1>${esc(s.dayName || 'Sesión')} ${editing ? '<span class="badge">editando</span>' : ''}</h1>
+      ${stale}
       <div class="card">
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
+      <p class="muted hint">Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.
+        <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.</p>
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
         <button class="primary block" data-act="finish">${editing || s.finished ? 'Guardar cambios' : 'Finalizar sesión'}</button>
@@ -225,9 +296,9 @@
   /** Texto bajo el campo: "= 60 kg" (o qué falta para calcularlo). */
   function totText(st, ex, isDrop) {
     const w = isDrop ? (st.drop && st.drop.weight) : st.weight;
-    if (loadMode(ex) === 'bricks') return w != null ? `= ${fmt(w)} ${unit()}` : `${fmt(S.BRICK_KG)} ${unit()} c/bloque`;
+    if (loadMode(ex) === 'bricks') return w != null ? `total ${fmt(w)} ${unit()}` : `${fmt(S.BRICK_KG)} ${unit()} c/bloque`;
     if (ex.bar == null) return 'elegí la barra ↑';
-    return w != null ? `= ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
+    return w != null ? `total ${fmt(w)} ${unit()}` : `barra ${fmt(ex.bar)} ${unit()}`;
   }
 
   /** Campo de peso con sus botones −/+. Con barra: discos POR LADO; con bloques: cantidad de BLOQUES. */
@@ -236,7 +307,7 @@
     const src = isDrop ? (st.drop || {}) : st;
     const f = (isDrop ? 'd' : '') + LOAD_KEY[mode];
     const val = mode === 'bar' ? S.sideOf(src, ex.bar) : mode === 'bricks' ? S.bricksOf(src) : src.weight;
-    const ph = mode === 'bar' ? 'x lado' : mode === 'bricks' ? 'bloques' : (isDrop ? 'drop kg' : '0');
+    const ph = mode === 'bar' ? '1 lado' : mode === 'bricks' ? 'cant.' : (isDrop ? 'drop kg' : '0');
     const hint = mode === 'bar' ? ' (discos por lado)' : mode === 'bricks' ? ' (bloques)' : '';
     return `
         <div class="stepper">
@@ -247,7 +318,7 @@
   }
   const totCaption = (st, ex, isDrop) => (loadMode(ex) !== 'plain' ? `<span class="tot">${totText(st, ex, isDrop)}</span>` : '');
   /** Encabezado de la columna de peso según el modo. */
-  const weightHead = (ex) => ({ bar: unit() + ' por lado', bricks: 'bloques', plain: unit() }[loadMode(ex)]);
+  const weightHead = (ex) => ({ bar: unit() + ' de UN lado', bricks: 'cant. de bloques', plain: unit() }[loadMode(ex)]);
 
   /** Guarda un peso tecleado y recalcula el total:
    *  barra → barra + 2 × lado · bloques → bloques × 5 · directo → tal cual. */
@@ -259,6 +330,22 @@
     if (key === 'weight') t.weight = v;
     else if (key === 'side') { t.side = v; t.weight = S.barTotal(ex.bar, v); }
     else if (key === 'bricks') { t.bricks = v; t.weight = S.bricksTotal(v); }
+  }
+
+  /** Al elegir la barra, las series vacías se completan con lo de la última vez pasado a discos por lado
+   *  (si no, al cambiar un ejercicio a "Con barra" se perdía el prellenado). */
+  function fillFromLast(s, ex) {
+    const last = S.lastEntry(ex.name, s.id, s.dayId);
+    if (!last || ex.bar == null) return;
+    let changed = false;
+    ex.sets.forEach((st, j) => {
+      if (st.done || st.side != null || st.weight != null) return;
+      const src = last.sets[j] || last.sets[last.sets.length - 1];
+      if (!src || src.weight == null || src.weight < ex.bar) return;
+      setWeight(st, ex, 'side', Math.round(((src.weight - ex.bar) / 2) * 100) / 100);
+      changed = true;
+    });
+    if (changed) S.commit();
   }
 
   /** Refresca el "= total" junto al campo, sin redibujar (no se pierde el foco). */
@@ -328,27 +415,123 @@
       const row = w.querySelector('.set, .ssset');
       if (row) row.classList.toggle('done', done);
     });
+    const back = document.querySelector('.back-day');   // ya hay algo marcado: no se ofrece cambiar de día
+    if (back && exs.some((e) => e.sets.some((st) => st.done))) back.remove();
     const btn = card.querySelector('[data-act="complete-ex"]');
-    btn.textContent = all ? 'Deshacer' : '✓ Completar';
+    btn.textContent = all ? 'Desmarcar todo' : '✓ Completar';
     btn.classList.toggle('ok', !all);
   }
 
-  function finishSession() {
-    const s = currentSession();
-    if (!s) return;
-    const pending = s.exercises.reduce((n, ex) => n + ex.sets.filter((st) => !st.done).length, 0);
-    const total = s.exercises.reduce((n, ex) => n + ex.sets.filter((st) => st.done).length, 0);
-    if (total === 0) {
-      if (confirm('No marcaste ninguna serie como hecha. ¿Descartar la sesión?')) {
-        S.deleteSession(s.id); ui.editId = null; toast('Sesión descartada'); go('train');
+  /** Avisos antes de marcar series con valores que suelen ser un error: pesos o reps enormes, o un
+   *  total que salta mucho respecto de la última vez (típico: poner el TOTAL en "kg por lado", o los
+   *  kg en "bloques"). Devuelve líneas de texto (vacío = todo bien). */
+  function warnings(s, ex, sts) {
+    const out = new Set();
+    const last = S.lastEntry(ex.name, s.id, s.dayId);
+    const lastMax = last ? Math.max(0, ...last.sets.map((x) => x.weight || 0)) : 0;
+    const was = lastMax ? ` (la última vez: ${fmt(lastMax)} ${unit()})` : '';
+    const mode = loadMode(ex);
+    sts.forEach((st) => {
+      const w = st.weight;
+      if (st.reps > MAX_REPS) out.add(`${ex.name}: ${st.reps} repeticiones`);
+      if (st.drop && st.drop.weight > MAX_KG) out.add(`${ex.name}: drop de ${fmt(st.drop.weight)} ${unit()}`);
+      if (w == null) return;
+      if (w > MAX_KG) out.add(`${ex.name}: ${fmt(w)} ${unit()}`);
+      else if (mode === 'bar' && (lastMax ? w > lastMax * 1.5 : S.sideOf(st, ex.bar) >= 50)) {
+        out.add(`${ex.name}: quedan ${fmt(w)} ${unit()} en total${was}. En el casillero va solo lo de UN lado, sin la barra`);
+      } else if (mode === 'bricks' && (lastMax ? w > lastMax * 1.5 : S.bricksOf(st) > 25)) {
+        out.add(`${ex.name}: ${fmt(S.bricksOf(st))} bloques = ${fmt(w)} ${unit()}${was}. En el casillero va la cantidad de bloques, no los kg`);
+      } else if (mode === 'plain' && lastMax >= 10 && w > lastMax * 2) {
+        out.add(`${ex.name}: ${fmt(w)} ${unit()}${was}`);
       }
+    });
+    return [...out];
+  }
+
+  /** Pregunta antes de marcar si hay algo raro. Devuelve true si se puede seguir. */
+  const okToMark = (lines) => !lines.length
+    || confirm('Revisá antes de marcar:\n\n• ' + lines.join('\n• ') + '\n\n¿Marcar igual?');
+
+  /** Una serie sin ✓ que se puede guardar como hecha: tiene reps y, si lleva barra, la barra está elegida. */
+  const markable = (ex, st) => setValid(st) && !(ex.usesBar && ex.bar == null);
+
+  /** Cuenta las series: con ✓, cargadas sin ✓ (se pueden guardar) y vacías (sin reps).
+   *  "where" = "Press inclinado (3) · Aperturas (4)": dónde quedaron las cargadas sin ✓. */
+  function countSets(s) {
+    const c = { done: 0, loaded: 0, empty: 0 }, by = [];
+    s.exercises.forEach((ex) => {
+      let n = 0;
+      ex.sets.forEach((st) => { if (st.done) c.done++; else if (markable(ex, st)) n++; else c.empty++; });
+      if (n) { c.loaded += n; by.push(`${ex.name} (${n})`); }
+    });
+    c.where = by.slice(0, 4).join(' · ') + (by.length > 4 ? ` y ${by.length - 4} ejercicio(s) más` : '');
+    return c;
+  }
+
+  /** "Finalizar sesión" (sesión nueva) o "Guardar cambios" (sesión del historial).
+   *  Nunca borra lo cargado sin preguntar: las series sin ✓ que tienen datos se pueden guardar
+   *  como hechas, y la sesión solo se borra si se elige explícitamente "Descartar" / "Borrar". */
+  let finishing = false;
+  async function finishSession() {
+    const s = currentSession();
+    if (!s || finishing) return;
+    const editing = !!ui.editId;
+    const { done, loaded, empty, where } = countSets(s);
+    const emptyTxt = empty ? ` Las ${empty} vacías (sin reps) no se guardan.` : '';
+    const loadedTxt = `Sin ✓: ${where}. Revisá si las hiciste: pueden tener los números que la app completó sola.${emptyTxt}`;
+    let choice = 'save';
+
+    if (loaded && done) {
+      choice = await askFinish(`Hay ${loaded} serie(s) sin ✓`, `Marcaste ${done} con ✓. ${loadedTxt}`, [
+        { label: `Guardar las ${done + loaded} series`, value: 'all', cls: 'primary' },
+        { label: done === 1 ? 'Guardar solo la serie con ✓' : `Guardar solo las ${done} con ✓`, value: 'save' },
+        { label: 'Volver a la sesión', value: null },
+      ]);
+    } else if (loaded) {
+      choice = await askFinish('No marcaste ninguna serie con ✓', loadedTxt, [
+          { label: `Guardar las ${loaded} series`, value: 'all', cls: 'primary' },
+          { label: 'Volver a la sesión', value: null },
+          // Al editar una sesión del historial no se ofrece borrarla: para eso está "Borrar" en Historial.
+          ...(editing ? [] : [{ label: 'Descartar la sesión', value: 'delete', cls: 'danger' }]),
+        ]);
+    } else if (!done) {
+      choice = editing
+        ? await askFinish('Esta sesión quedó vacía',
+          'Ninguna serie tiene repeticiones cargadas. Si la borrás, desaparece del historial y no se puede deshacer.', [
+            { label: 'Volver a la sesión', value: null, cls: 'primary' },
+            { label: 'Borrar del historial', value: 'delete', cls: 'danger' },
+          ])
+        : await askFinish('No hay nada para guardar', 'Ninguna serie tiene repeticiones cargadas.', [
+          { label: 'Volver a la sesión', value: null, cls: 'primary' },
+          { label: 'Descartar la sesión', value: 'delete', cls: 'danger' },
+        ]);
+    }
+    if (!choice) return;
+
+    // Mientras la ventana estaba abierta pudo llegar una versión nueva desde la nube: se usa la actual.
+    const live = S.find(S.state.sessions, s.id);
+    if (!live) { toast('La sesión ya no existe'); ui.editId = null; go('history'); return; }
+    if (choice === 'delete') {
+      S.deleteSession(live.id); ui.editId = null;
+      toast(editing ? 'Sesión borrada del historial' : 'Sesión descartada');
+      go(editing ? 'history' : 'train');
       return;
     }
-    if (pending && !confirm(`Hay ${pending} serie(s) sin marcar con ✓. Se van a descartar. ¿Continuar?`)) return;
-    S.finishSession(s.id);
+    if (choice === 'all') {
+      const lines = live.exercises.flatMap((ex) => warnings(live, ex, ex.sets.filter((st) => !st.done && markable(ex, st))));
+      if (!okToMark(lines)) return;
+      live.exercises.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
+    }
+    S.finishSession(live.id);
     ui.editId = null;
-    toast('Sesión guardada ✓');
+    toast((editing ? 'Cambios guardados ✓' : 'Sesión guardada ✓') + (empty ? ` · ${empty} vacía(s) sin guardar` : ''));
     go('history');
+  }
+
+  /** Abre la ventana de opciones de finalizar, bloqueando un segundo "Finalizar" mientras está abierta. */
+  async function askFinish(title, text, options) {
+    finishing = true;
+    try { return await choose(title, esc(text), options); } finally { finishing = false; }
   }
 
   /* ======================================================================
@@ -358,7 +541,12 @@
   function viewHistory() {
     const list = S.sessions().reverse();
     if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. ¡Empezá a entrenar!</p>';
-    return '<h1>Historial</h1>' + list.map((s) => {
+    // Sin cuenta los datos están solo en este teléfono: cada 10 sesiones sin backup, se recuerda.
+    const since = S.sessionsSinceExport();
+    const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
+      <div class="note revisar">Hace <b>${since} entrenamientos</b> que no exportás un backup y tus datos están solo en este teléfono.
+        <button class="block" style="margin-top:8px" data-act="export-json">⬇ Exportar backup ahora</button></div>` : '';
+    return '<h1>Historial</h1>' + remind + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
@@ -449,14 +637,15 @@
     ].filter(Boolean).join(' · ');
     return `
         <h2 style="margin-top:16px">1RM estimado</h2>
+        <p class="muted">El peso máximo que podrías levantar una sola vez, calculado con tus series.</p>
         <div class="stats">
           <div class="stat"><b>${last ? fmt(last.e1rm) + ' ' + unit() : '–'}</b><span>Último</span></div>
           <div class="stat"><b>${rec.e1rm ? fmt(rec.e1rm.e1rm) + ' ' + unit() : '–'}</b><span>Récord</span></div>
-          <div class="stat"><b>${rel}</b><span>Fuerza relativa${bw ? '' : ' (cargá tu peso abajo)'}</span></div>
+          <div class="stat"><b>${rel}</b><span>Fuerza relativa (1RM ÷ tu peso)${bw ? '' : ' · cargá tu peso abajo'}</span></div>
         </div>
         ${pts.length >= 2 ? '<div class="svgchart" data-chart="e1rm"></div>'
           : `<p class="muted chart-empty">${pts.length ? 'Con 1 sesión todavía no hay evolución para mostrar.' : `Sin series de hasta ${S.E1RM_MAX_REPS} reps para estimar el 1RM.`}</p>`}
-        <p class="muted">Récords: ${recLine || 'sin datos'}. El 1RM se estima (fórmula de Epley) con series de hasta ${S.E1RM_MAX_REPS} reps.</p>`;
+        <p class="muted">Récords: ${recLine || 'sin datos'}. Se calcula solo con series de hasta ${S.E1RM_MAX_REPS} reps.</p>`;
   }
 
   /** Resumen semanal: volumen y series por semana, y el detalle de la última semana. */
@@ -472,12 +661,12 @@
         <div class="stats">
           <div class="stat"><b>${w.sessions}</b><span>Sesiones</span></div>
           <div class="stat"><b>${w.sets}</b><span>Series hechas</span></div>
-          <div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Efectivas (RIR ≤ ${S.EFFECTIVE_RIR_MAX})</span></div>
+          <div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
           <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>
           <div class="stat"><b>${w.minutesAvg != null ? w.minutesAvg + ' min' : '–'}</b><span>Duración promedio</span></div>
-          <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen (${unit()})</span></div>
+          <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen: peso × reps (${unit()})</span></div>
         </div>
-        ${w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las efectivas solo cuentan las que tienen RIR.</p>` : ''}
+        ${w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
       </div>`;
   }
 
@@ -826,7 +1015,9 @@
     if (!Cloud.user) {
       return `<div class="card stack"><h2>Cuenta</h2>
         <p class="muted">Sin sesión: los datos se guardan solo en este dispositivo.</p>
-        <button class="primary block" data-act="login">Iniciar sesión con Google</button></div>`;
+        ${deniedText() ? `<p class="err">${esc(deniedText())}</p>` : ''}
+        <button class="block" data-act="login">Iniciar sesión con Google</button>
+        <p class="muted">Solo para cuentas habilitadas.</p></div>`;
     }
     return `<div class="card stack"><h2>Cuenta</h2>
       <p>${esc(Cloud.user.email)}</p>
@@ -840,12 +1031,19 @@
       <div class="login">
         <div class="logo">🏋️</div>
         <h1>Mi Rutina</h1>
-        <p class="muted">Iniciá sesión para guardar tus entrenamientos en la nube y no perderlos nunca.</p>
-        <button class="primary block" data-act="login">Entrar con Google</button>
+        <p class="muted">Anotá tus entrenamientos: series, pesos y repeticiones. Tus datos se guardan en este teléfono.</p>
+        ${deniedText() ? `<p class="err">${esc(deniedText())}</p>` : ''}
+        <button class="primary block" data-act="skip-login">Empezar</button>
+        <button class="block" style="margin-top:10px" data-act="login">Entrar con Google</button>
+        <p class="muted login-sub">Solo para cuentas habilitadas: guarda también en la nube y sincroniza tus dispositivos.</p>
         <p class="err" id="login-err"></p>
-        <button class="link-btn" data-act="skip-login">Usar sin cuenta (solo en este dispositivo)</button>
       </div>`;
   }
+
+  /** Aviso si se entró con una cuenta de Google que no está habilitada (cloud.js cerró su sesión). */
+  const deniedText = () => (window.Cloud && Cloud.deniedEmail
+    ? `${Cloud.deniedEmail} no está habilitada para guardar en la nube. Podés usar la app sin cuenta: tus datos quedan en este teléfono.`
+    : '');
 
   /** Traduce errores de login a mensajes comprensibles. */
   function loginErrorText(e) {
@@ -864,11 +1062,14 @@
       ${accountCard()}
       <div class="card stack">
         <h2>Backup</h2>
-        <p class="muted">${n} sesión(es) guardadas. Tus datos viven solo en este dispositivo: hacé un backup de vez en cuando.</p>
+        <p class="muted">${n} sesión(es) guardadas. ${window.Cloud && Cloud.user
+          ? 'Se guardan en este dispositivo y en la nube. Igual conviene exportar un backup de vez en cuando.'
+          : 'Tus datos viven solo en este dispositivo: hacé un backup de vez en cuando.'}</p>
         <button class="primary block" data-act="export-json">⬇ Exportar backup (JSON)</button>
-        <button class="block" data-act="import-json">⬆ Importar backup (JSON)</button>
+        <button class="block" data-act="import-json">⬆ Restaurar un backup (reemplaza todo)</button>
         <input type="file" id="file" accept="application/json,.json" hidden>
       </div>
+      ${backupsCard()}
       <div class="card stack">
         <h2>Planilla</h2>
         <button class="block" data-act="export-csv">⬇ Exportar historial (CSV)</button>
@@ -885,9 +1086,30 @@
         ${S.hasRoutineBackup() ? '<button class="block" data-act="undo-routine">↩ Deshacer última importación de rutina</button>' : ''}
       </div>
       <div class="card stack">
-        <h2>Rutina original</h2>
-        <p class="muted">Vuelve a cargar la rutina de rutina.json. No toca el historial.</p>
-        <button class="block danger" data-act="reset-routine">Restaurar rutina original</button>
+        <h2>Rutina de ejemplo</h2>
+        <p class="muted">Reemplaza tu rutina por la de ejemplo. No toca el historial y lo de antes queda como copia automática.</p>
+        <button class="block danger" data-act="reset-routine">Volver a la rutina de ejemplo</button>
+      </div>`;
+  }
+
+  const BACKUP_WHY = {
+    import: 'antes de restaurar un backup', 'reset-routine': 'antes de volver a la rutina de ejemplo',
+    cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
+  };
+  /** "copia del 20 oct, 21:40" (las copias de versiones viejas no tienen fecha). */
+  const copyName = (at) => (at ? 'copia del ' + new Date(at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'copia anterior');
+
+  /** Copias automáticas que la app guardó antes de reemplazar datos, con botón para volver a cada una. */
+  function backupsCard() {
+    const list = S.listBackups().filter((b) => b.mine);
+    if (!list.length) return '';
+    return `
+      <div class="card stack">
+        <h2>Copias automáticas</h2>
+        <p class="muted">La app guarda lo que tenías antes de reemplazar tus datos. Recuperar una copia reemplaza lo de ahora, que a su vez queda como copia.</p>
+        ${list.map((b) => `
+          <button class="block" data-act="restore-backup" data-at="${b.at}">↩ Recuperar ${esc(copyName(b.at))}
+            <small class="muted btn-sub">${b.sessions} sesión(es) · ${b.days} día(s) de rutina${BACKUP_WHY[b.reason] ? ' · ' + BACKUP_WHY[b.reason] : ''}</small></button>`).join('')}
       </div>`;
   }
 
@@ -896,14 +1118,16 @@
     try {
       const routine = S.parseRoutineImport(text);
       const nEx = routine.days.reduce((n, d) => n + d.exercises.length, 0);
-      const resumen = routine.days.map((d) => `• ${d.name}: ${d.exercises.length} ejercicios`).join('\n');
+      const resumen = routine.days.map((d) => `• ${d.name}: ${d.exercises.length} ejercicios${d.exercises.length ? '' : '  ⚠ vacío'}`).join('\n');
       if (!confirm(`Vas a REEMPLAZAR tu rutina actual por esta:\n\n${resumen}\n\nTotal: ${nEx} ejercicios.\nTu historial NO se modifica y podés deshacer desde Datos.\n\n¿Continuar?`)) return;
       S.replaceRoutine(routine);
       ui.pasteOpen = false;
       toast('Rutina actualizada ✓ — revisá las notas marcadas');
       go('routine');
     } catch (err) {
-      alert('No se pudo importar la rutina: ' + err.message);
+      alert(/JSON válido/.test(err.message)
+        ? 'Ese texto no tiene el formato de rutina de esta app. Pedile a quien te armó la rutina el archivo para esta app (termina en .json) e importalo con "Importar rutina (archivo JSON)".'
+        : 'No se pudo importar la rutina: ' + err.message);
     }
   }
 
@@ -912,9 +1136,30 @@
     try {
       const next = S.parseImport(await file.text());
       const nS = next.sessions.length, nD = next.routine.days.length;
-      if (!confirm(`Vas a SOBRESCRIBIR todos tus datos actuales con el archivo:\n\n• ${nD} día(s) de rutina\n• ${nS} sesión(es)\n\nSe guarda una copia de seguridad automática del estado anterior. ¿Continuar?`)) return;
-      S.replaceAll(next);
-      toast('Backup importado ✓');
+      // ¿Qué se perdería? Sesiones de acá que el archivo no trae (ej.: eligieron un archivo de solo rutina).
+      const ids = new Set(next.sessions.map((s) => s.id));
+      const mine = S.state.sessions.filter((s) => s.finished);
+      const lost = mine.filter((s) => !ids.has(s.id)).length;
+      const lostBw = S.state.bodyweights.length && !next.bodyweights.length;
+      if (lost || lostBw) {
+        const what = [lost ? `${lost} sesión(es) de tu historial` : '', lostBw ? 'tu registro de peso corporal' : ''].filter(Boolean).join(' y ');
+        const choice = await choose('Este archivo te borraría datos',
+          esc(`Tenés ${mine.length} sesión(es) guardadas y el archivo trae ${nS}. Si reemplazás todo, se borran ${what}. `
+            + 'Si solo querías cambiar los ejercicios, elegí "Importar solo la rutina": tu historial no se toca.'), [
+            ...(nD ? [{ label: 'Importar solo la rutina', value: 'routine', cls: 'primary' }] : []),
+            { label: 'Cancelar', value: null, cls: nD ? '' : 'primary' },
+            { label: 'Reemplazar todo igual', value: 'all', cls: 'danger' },
+          ]);
+        if (choice === 'routine') {
+          S.replaceRoutine(next.routine);
+          toast('Rutina actualizada ✓ — tu historial no se tocó');
+          go('routine');
+          return;
+        }
+        if (choice !== 'all') return;
+      } else if (!confirm(`Vas a REEMPLAZAR todos tus datos actuales con el archivo:\n\n• ${nD} día(s) de rutina\n• ${nS} sesión(es)\n\nLo que tenés ahora queda como copia automática: se puede recuperar desde Datos. ¿Continuar?`)) return;
+      S.replaceAll(next, 'import');
+      toast('Backup importado ✓ · lo anterior quedó como copia en Datos');
       go('train');
     } catch (err) {
       alert('No se pudo importar: ' + err.message);
@@ -976,7 +1221,10 @@
 
   document.getElementById('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
-    if (b) go(b.dataset.tab);
+    if (!b) return;
+    // Editando una sesión vieja, tocar Entrenar sale de la edición (lo cambiado ya quedó guardado).
+    if (b.dataset.tab === 'train' && ui.editId) { ui.editId = null; toast('Saliste de la edición: los cambios ya quedaron guardados'); }
+    go(b.dataset.tab);
   });
 
   /* Reordenar ejercicios arrastrando el asa (Pointer Events; funciona con dedo y mouse). */
@@ -1043,6 +1291,7 @@
     raf = requestAnimationFrame(tick);
   });
 
+  let lastComplete = { card: null, t: 0 };   // último toque en "✓ Completar" (para ignorar el doble toque)
   $view.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
@@ -1072,7 +1321,13 @@
         break;
       }
       case 'pick-bar':
-        S.setSessionBar(c.ex, Number(btn.dataset.bar)); render();
+        S.setSessionBar(c.ex, Number(btn.dataset.bar)); fillFromLast(c.s, c.ex); render();
+        break;
+      case 'change-day':
+        if (!c.s.exercises.some((ex) => ex.sets.some((st) => st.done))) { S.deleteSession(c.s.id); render(); window.scrollTo(0, 0); }
+        break;
+      case 'session-today':
+        c.s.date = S.todayStr(); S.commit(); render(); toast('Sesión pasada a hoy');
         break;
       case 'toggle-drop':
         c.ex.drop = !c.ex.drop;
@@ -1085,8 +1340,9 @@
         // Una serie (o la serie completa de una superserie): todos los ejercicios del grupo a la vez.
         const sts = c.exs.map((e) => e.sets[c.j]).filter(Boolean);
         const turnOn = !sts.every((x) => x.done);
-        if (turnOn && c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Elegí qué barra usaste'); break; }
+        if (turnOn && c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Primero elegí la barra (arriba)'); break; }
         if (turnOn && !sts.every(setValid)) { toast('Cargá las repeticiones primero'); break; }
+        if (turnOn && !okToMark(c.exs.flatMap((e) => (e.sets[c.j] ? warnings(c.s, e, [e.sets[c.j]]) : [])))) break;
         sts.forEach((x) => { x.done = turnOn; });
         c.exs.forEach(syncEx); S.commit(); refreshCard(c.card, c.exs);
         if (turnOn) {                                      // pulso en el tilde, en el mismo instante
@@ -1096,10 +1352,18 @@
         }
         break;
       }
-      case 'del-set':
-        c.exs.forEach((e) => { e.sets.splice(c.j, 1); syncEx(e); });
-        S.commit(); render();
+      case 'del-set': {
+        const { s, exs, j } = c;
+        const removed = exs.map((e) => e.sets.splice(j, 1)[0]);   // undefined si ese ejercicio tenía menos series
+        exs.forEach(syncEx); S.commit(); render();
+        toast('Serie borrada', { label: 'Deshacer', fn: () => {
+          // Solo si sigue siendo la sesión visible (no se terminó ni la reemplazó una versión de la nube).
+          if (currentSession() !== s) { toast('Ya no se puede deshacer'); return; }
+          exs.forEach((e, i) => { if (removed[i]) e.sets.splice(Math.min(j, e.sets.length), 0, removed[i]); syncEx(e); });
+          S.commit(); render();
+        } });
         break;
+      }
       case 'add-set':
         c.exs.forEach((e) => {
           const prev = e.sets[e.sets.length - 1];
@@ -1114,10 +1378,21 @@
         S.commit(); render();
         break;
       case 'complete-ex': {
+        // Un doble toque marcaba y enseguida desmarcaba todo (el botón cambia en el mismo lugar).
+        if (lastComplete.card === c.card && Date.now() - lastComplete.t < 800) break;
+        lastComplete = { card: c.card, t: Date.now() };
         if (c.exs.every((e) => e.done)) {
           c.exs.forEach((e) => { e.sets.forEach((st) => { st.done = false; }); e.done = false; });
         } else {
-          if (c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Elegí qué barra usaste'); break; }
+          if (c.exs.some((e) => e.usesBar && e.bar == null)) { toast('Primero elegí la barra (arriba)'); break; }
+          const lines = c.exs.flatMap((e) => {
+            const toMark = e.sets.filter((st) => !st.done && setValid(st));
+            const last = S.lastEntry(e.name, c.s.id, c.s.dayId);
+            const usesWeight = !last || last.sets.some((x) => x.weight != null);   // sin historial o con peso antes
+            const noW = toMark.filter((st) => st.weight == null).length;
+            return [...(usesWeight && noW ? [`${e.name}: ${noW} serie(s) sin peso`] : []), ...warnings(c.s, e, toMark)];
+          });
+          if (!okToMark(lines)) break;
           let skipped = 0;
           c.exs.forEach((e) => { e.sets.forEach((st) => { if (setValid(st)) st.done = true; else skipped++; }); syncEx(e); });
           if (skipped) toast(`${skipped} serie(s) sin reps quedaron sin marcar`);
@@ -1187,7 +1462,11 @@
       }
       case 'toggle-ss': {
         const id = btn.closest('[data-id]').dataset.id;
-        S.toggleSuperset(btn.closest('[data-day]').dataset.day, id);
+        const day = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
+        const i = day.exercises.findIndex((x) => x.id === id), a = day.exercises[i], b = day.exercises[i + 1];
+        const linked = a.group && b && a.group === b.group;
+        if (!linked && !confirm(`¿Unir "${a.name}" y "${b.name}" en superserie?\n\nSe hacen alternados: una serie de cada uno, uno tras otro, y recién ahí se descansa.`)) break;
+        S.toggleSuperset(day.id, id);
         ui.open.add(id); render();
         break;
       }
@@ -1216,20 +1495,34 @@
         }
         btn.disabled = false;
         break;
-      case 'skip-login': Cloud.skip(); break;
+      case 'skip-login': Cloud.deniedEmail = ''; Cloud.skip(); break;
       case 'logout': {
         const pending = Cloud.status === 'syncing' || Cloud.status === 'offline';
-        const msg = pending
-          ? 'Hay cambios que todavía no se subieron a la nube. Si cerrás sesión ahora se conservan en este dispositivo y se suben la próxima vez que entres. ¿Cerrar sesión?'
-          : '¿Cerrar sesión? Tus datos quedan guardados en la nube.';
+        const msg = Cloud.status === 'error'
+          ? 'La nube está dando error: puede que tus últimos cambios no se hayan subido. Quedan guardados en este dispositivo. ¿Cerrar sesión?'
+          : pending
+            ? 'Hay cambios que todavía no se subieron a la nube. Si cerrás sesión ahora se conservan en este dispositivo y se suben la próxima vez que entres. ¿Cerrar sesión?'
+            : '¿Cerrar sesión? Tus datos quedan guardados en la nube.';
         if (confirm(msg)) await Cloud.signOut();
         break;
       }
 
       /* --- datos --- */
-      case 'export-json': download(`rutina-gym-backup-${S.todayStr()}.json`, S.exportJSON(), 'application/json'); toast('Backup descargado'); break;
+      case 'export-json':
+        download(`rutina-gym-backup-${S.todayStr()}.json`, S.exportJSON(), 'application/json');
+        S.markExported(); toast('Backup descargado'); if (ui.tab === 'history') render();
+        break;
       case 'export-csv': download(`historial-gym-${S.todayStr()}.csv`, S.exportCSV(), 'text/csv;charset=utf-8'); toast('CSV descargado'); break;
       case 'import-json': document.getElementById('file').click(); break;
+      case 'restore-backup': {
+        const at = Number(btn.dataset.at);
+        const b = S.listBackups().find((x) => x.at === at);
+        const now = S.state.sessions.filter((s) => s.finished).length;
+        if (b && confirm(`¿Recuperar la ${copyName(at)}?\n\nTiene ${b.sessions} sesión(es) y ${b.days} día(s) de rutina.\nLo que tenés ahora (${now} sesión(es)) queda guardado como copia.`)) {
+          if (S.restoreBackup(at)) { toast('Copia recuperada ✓'); go('history'); } else alert('No se pudo recuperar esa copia.');
+        }
+        break;
+      }
       case 'import-routine-file': document.getElementById('file-routine').click(); break;
       case 'toggle-paste': ui.pasteOpen = !ui.pasteOpen; render(); break;
       case 'apply-paste': applyRoutineText(document.getElementById('paste-json').value); break;
@@ -1239,8 +1532,8 @@
         }
         break;
       case 'reset-routine':
-        if (confirm('¿Reemplazar tu rutina actual por la original de rutina.json? El historial se conserva.')) {
-          try { await S.resetRoutine(); toast('Rutina restaurada'); render(); } catch (err) { alert(err.message); }
+        if (confirm('¿Reemplazar tu rutina actual por la de ejemplo? El historial se conserva y lo de antes queda como copia automática en Datos.')) {
+          try { await S.resetRoutine(); toast('Rutina de ejemplo cargada'); render(); } catch (err) { alert(err.message); }
         }
         break;
     }
@@ -1254,7 +1547,7 @@
     if (['weight', 'side', 'bricks', 'dweight', 'dside', 'dbricks'].includes(el.dataset.f)) {
       const { st, ex } = ctx(el);
       if (!st) return;
-      const v = S.parseNum(el.value);
+      const v = isThousands(el.value) ? NaN : S.parseNum(el.value);
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;                 // no guarda valores inválidos
       setWeight(st, ex, el.dataset.f, v); S.commit(); updateTot(el, st, ex);
@@ -1275,13 +1568,15 @@
       return;
     }
     if (el.dataset.f === 'reps') {
-      const { st } = ctx(el);
+      const c = ctx(el), { st } = c;
       if (!st) return;
       let v = S.parseNum(el.value);
       if (!Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;
-      st.reps = v; S.commit();
+      st.reps = v;
+      if (st.done && !(v > 0)) { st.done = false; c.exs.forEach(syncEx); refreshCard(c.card, c.exs); }   // sin reps no cuenta como hecha
+      S.commit();
       return;
     }
 
@@ -1361,8 +1656,18 @@
       if (f) f.text().then(applyRoutineText);
       return;
     }
+    if (el.dataset.rf === 'name' && !el.classList.contains('invalid')) {   // nombre repetido: comparten historial
+      const id = el.closest('[data-id]').dataset.id, key = S.normName(el.value);
+      const dup = S.state.routine.days.find((d) => d.exercises.some((x) => x.id !== id && S.normName(x.name) === key));
+      if (dup) toast(`Ya existe "${el.value.trim()}" en ${dup.name}: van a compartir historial y pesos`);
+      return;
+    }
     if (el.classList.contains('invalid')) {
-      toast('Valor no válido: se restauró el anterior');
+      const why = isThousands(el.value) ? 'Para decimales usá coma (ej.: 2,5)'
+        : el.dataset.f === 'rir' ? 'RIR va de 0 a 10, sin decimales'
+        : ['reps', 'dreps'].includes(el.dataset.f) ? 'Las reps van sin decimales'
+        : 'Valor no válido';
+      toast(why + ': se restauró el anterior');
       const { st, ex } = ctx(el);
       if (st && ['weight', 'side', 'bricks', 'reps', 'dweight', 'dside', 'dbricks', 'dreps', 'rir'].includes(el.dataset.f)) {
         const d = st.drop || {};
@@ -1381,8 +1686,15 @@
   $view.addEventListener('focusin', (e) => {
     const el = e.target;
     if (el.matches && el.matches('.setw input[data-f]')) {
+      el.dataset.justFocused = '1';
       setTimeout(() => { try { el.select(); el.setSelectionRange(0, 99); } catch (err) { /* nada */ } }, 0);
     }
+  });
+  /* El "soltar" del mismo toque que dio el foco movía el cursor y deshacía la selección
+     (lo nuevo se mezclaba con lo viejo: "10" → "18.50"). */
+  $view.addEventListener('mouseup', (e) => {
+    const el = e.target;
+    if (el.dataset && el.dataset.justFocused) { e.preventDefault(); delete el.dataset.justFocused; }
   });
 
   /* Recuerda qué ejercicios del editor están desplegados (el evento "toggle" no burbujea). */
@@ -1401,6 +1713,39 @@
 
   S.onSaveError = () => toast('⚠ No se pudo guardar (almacenamiento lleno o bloqueado)');
 
+  /* ---------- la app abierta en otra pestaña o ventana ----------
+     Guarda una sola a la vez (ver store.js). La que queda en pausa se tapa con un aviso; al
+     volver a ella o tocar "Seguir en esta", recarga lo más reciente y pasa a ser la que guarda. */
+  function showTabWall() {
+    if (document.getElementById('tabwall')) return;
+    const w = document.createElement('div');
+    w.id = 'tabwall';
+    w.className = 'sheet-bg';
+    w.innerHTML = `
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tabwall-t">
+        <h2 id="tabwall-t">La app está abierta en otra pestaña o ventana</h2>
+        <p class="muted">Para no pisar tus datos, se guarda en una sola a la vez. Si seguís acá, se cargan los datos más recientes.</p>
+        <div class="stack"><button class="primary block" data-act="tab-claim">Seguir en esta</button></div>
+      </div>`;
+    w.addEventListener('click', (e) => { if (e.target.closest('[data-act="tab-claim"]')) resumeHere(); });
+    document.body.appendChild(w);
+  }
+  function resumeHere() {
+    if (!S.state) return;                        // todavía arrancando
+    const reloaded = S.claimTab();
+    const w = document.getElementById('tabwall');
+    if (w) w.remove();
+    if (!reloaded) return;
+    if (window.Cloud && Cloud.resume) Cloud.resume();
+    if (ui.editId && !S.find(S.state.sessions, ui.editId)) ui.editId = null;
+    render();
+    toast('Datos actualizados con los de la otra pestaña');
+  }
+  S.onInactive = showTabWall;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resumeHere(); });
+  window.addEventListener('focus', resumeHere);
+  window.addEventListener('pageshow', (e) => { if (e.persisted) resumeHere(); });
+
   /* Datos nuevos de la nube (ej.: cargaste algo desde otro dispositivo). Si estás
      escribiendo en un campo se espera a que termines para no cortarte la edición. */
   let renderPending = false;
@@ -1414,9 +1759,13 @@
   });
 
   if (window.Cloud) {
+    let shownDenied = '';
     Cloud.onChange = () => {
-      // Cambió el login o el estado: solo se redibuja si cambió algo visible importante.
-      if (gated() !== document.body.classList.contains('gate') || ui.tab === 'data') {
+      // Cambió el login o el estado: solo se redibuja si cambió algo visible importante
+      // (incluido el aviso de cuenta no habilitada, que aparece en la pantalla de inicio).
+      const deniedChanged = Cloud.deniedEmail !== shownDenied;
+      shownDenied = Cloud.deniedEmail;
+      if (deniedChanged || gated() !== document.body.classList.contains('gate') || ui.tab === 'data') {
         if (typing()) renderPending = true; else render();
       } else updateSyncBadge();
     };
