@@ -768,6 +768,7 @@
     return `
     <details class="exe ${rev ? 'revisar-box' : ''}" data-id="${esc(e.id)}" ${ui.open.has(e.id) ? 'open' : ''}>
       <summary>
+        <button class="drag-handle" tabindex="-1" aria-label="Arrastrar para reordenar">⋮⋮</button>
         <span><b data-sum="name">${esc(e.name)}</b>
           <span class="muted" data-sum="info">${esc(exInfo(e))}</span>
           ${inSuperset ? '<span class="badge">Superserie</span>' : ''}
@@ -976,6 +977,70 @@
   document.getElementById('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
     if (b) go(b.dataset.tab);
+  });
+
+  /* Reordenar ejercicios arrastrando el asa (Pointer Events; funciona con dedo y mouse). */
+  $view.addEventListener('click', (e) => {
+    if (e.target.closest('.drag-handle')) e.preventDefault();     // que el asa no abra/cierre el ejercicio
+  });
+  $view.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    const el = handle.closest('details.exe'), section = el.closest('[data-day]');
+    const list = () => [...section.querySelectorAll(':scope > details.exe')];
+    const from = list().indexOf(el);
+    const rect = el.getBoundingClientRect();
+    const grab = e.clientY - rect.top;
+    const ph = document.createElement('div');
+    ph.className = 'exe-ph';
+    ph.style.height = rect.height + 'px';
+    el.before(ph);
+    el.classList.add('dragging');
+    Object.assign(el.style, { width: rect.width + 'px', left: rect.left + 'px', top: rect.top + 'px' });
+    try { handle.setPointerCapture(e.pointerId); } catch (err) { /* nada */ }
+    let y = e.clientY, raf = 0, slot = from;
+
+    const place = () => {
+      el.style.top = (y - grab) + 'px';
+      const others = list().filter((x) => x !== el);
+      slot = others.filter((x) => { const r = x.getBoundingClientRect(); return r.top + r.height / 2 < y; }).length;
+      const ref = others[slot] || section.querySelector(':scope > [data-act="add-ex"]');
+      if (ph.nextElementSibling !== ref) section.insertBefore(ph, ref);
+    };
+    const tick = () => {
+      const edge = 70, step = 14;
+      if (y < edge) window.scrollBy(0, -step * (1 - Math.max(y, 0) / edge) - 2);
+      else if (y > window.innerHeight - edge) window.scrollBy(0, step * (1 - Math.max(window.innerHeight - y, 0) / edge) + 2);
+      place();
+      raf = requestAnimationFrame(tick);
+    };
+    const end = (commitDrop) => {
+      cancelAnimationFrame(raf);
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', cancel);
+      document.removeEventListener('keydown', key, true);
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) { /* nada */ }
+      el.classList.remove('dragging');
+      el.removeAttribute('style');
+      const others = list().filter((x) => x !== el);               // vuelve a su lugar original en el DOM
+      section.insertBefore(el, others[from] || section.querySelector(':scope > [data-act="add-ex"]'));
+      ph.remove();
+      if (commitDrop && slot !== from) {
+        S.moveExerciseTo(section.dataset.day, el.dataset.id, slot);
+        render();
+      }
+    };
+    const move = (ev) => { y = ev.clientY; };
+    const up = (ev) => { y = ev.clientY; place(); end(true); };   // toma la posición final aunque no haya dado tiempo a otro cuadro
+    const cancel = () => end(false);
+    const key = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); end(false); } };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', cancel);
+    document.addEventListener('keydown', key, true);
+    raf = requestAnimationFrame(tick);
   });
 
   $view.addEventListener('click', async (e) => {
