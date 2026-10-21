@@ -15,6 +15,7 @@
     progKey: null,       // ejercicio elegido en Progreso
     progDay: null,       // día elegido en el gráfico de volumen por día
     progWeek: null,      // semana elegida en series por músculo
+    helpOpen: new Set(), // ayudas ya leídas que se volvieron a abrir con ⓘ
     chart: null,
   };
 
@@ -35,6 +36,14 @@
   const fmtShort = (str) => toDate(str).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
 
   const isRevisar = (txt) => /\bREVISAR\b/.test(txt || '');
+
+  /* Ayudas: se ven abiertas hasta tocar "Entendido" (se recuerda en este dispositivo); después
+     queda un ⓘ junto al título que las vuelve a abrir. Los avisos (sesión de ayer, backup) no van acá. */
+  const helpSeen = (id) => !!S.getPref('help.' + id);
+  const helpBox = (id, html) => (!helpSeen(id) || ui.helpOpen.has(id) ? `
+    <div class="help-box"><div>${html}</div><button class="help-ok" data-act="help-ok" data-help="${id}">Entendido</button></div>` : '');
+  const helpBtn = (id) => (helpSeen(id) && !ui.helpOpen.has(id)
+    ? `<button class="info" data-act="help-show" data-help="${id}" aria-label="Ver ayuda">i</button>` : '');
 
   /** Vibración muy corta al completar algo (Android; en iPhone no existe y se ignora). */
   const haptic = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* nada */ } };
@@ -175,11 +184,11 @@
   function exerciseCard(s, ex, i) {
     return `
       <section class="card ex ${ex.done ? 'done' : ''}" data-ex="${i}">
-        <div class="ex-head"><h3>${esc(ex.name)}</h3><span class="target">${targetText(ex)}</span></div>
+        <div class="ex-head"><h3>${esc(ex.name)}${ex.drop ? helpBtn('drop') : ''}</h3><span class="target">${targetText(ex)}</span></div>
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
-        ${ex.drop ? '<p class="muted help">↳ Drop set: cada serie tiene una segunda parte sin descanso, con menos peso.</p>' : ''}
+        ${ex.drop ? helpBox('drop', '↳ <b>Drop set:</b> cada serie tiene una segunda parte sin descanso, con menos peso.') : ''}
         <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps · RIR</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
@@ -228,8 +237,8 @@
     const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
     return `
       <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
-        <div class="ex-head"><h3>Superserie</h3><span class="target">${exs.map(targetText).join(' + ')}</span></div>
-        <p class="muted help">Hacé una serie de cada ejercicio, uno tras otro, y recién ahí descansá. El ✓ marca la vuelta completa.</p>
+        <div class="ex-head"><h3>Superserie${helpBtn('superset')}</h3><span class="target">${exs.map(targetText).join(' + ')}</span></div>
+        ${helpBox('superset', 'Hacé una serie de cada ejercicio, uno tras otro, y recién ahí descansá. El ✓ marca la vuelta completa.')}
         ${notes}
         ${prevs}
         ${idxs.map((i) => barPicker(s.exercises[i], i, s.exercises[i].name)).join('')}
@@ -260,14 +269,13 @@
       </div>` : '';
     return `
       ${back}
-      <h1>${esc(s.dayName || 'Sesión')} ${editing ? '<span class="badge">editando</span>' : ''}</h1>
+      <h1>${esc(s.dayName || 'Sesión')} ${editing ? '<span class="badge">editando</span>' : ''}${helpBtn('session')}</h1>
       ${stale}
       <div class="card">
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
-      <p class="muted hint">Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.
-        <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.</p>
+      ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓. <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.')}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
         <button class="primary block" data-act="finish">${editing || s.finished ? 'Guardar cambios' : 'Finalizar sesión'}</button>
@@ -580,7 +588,13 @@
         <div class="card"><h2>Por ejercicio</h2><p class="muted">Cuando termines tu primera sesión vas a ver acá el gráfico de cada ejercicio.</p></div>
         ${weekCard()}${muscleCard()}${stallsCard()}${bodyweightCard()}${dayChartCard()}${cycleChartCard()}`;
     }
-    if (!names.some((n) => n.key === ui.progKey)) ui.progKey = names[0].key;
+    if (ui.progKey == null) ui.progKey = S.getPref('progKey');        // el último elegido en este dispositivo
+    if (!names.some((n) => n.key === ui.progKey)) {
+      // Sin elección guardada: el primer ejercicio de la última sesión terminada (no el primero alfabético).
+      const last = S.sessions().filter((s) => s.finished).pop();
+      const k = last && last.exercises[0] ? S.normName(last.exercises[0].name) : null;
+      ui.progKey = names.some((n) => n.key === k) ? k : names[0].key;
+    }
     const { points, best } = S.progress(ui.progKey);
     const last = points[points.length - 1];
 
@@ -636,8 +650,8 @@
       rec.volume ? `volumen ${fmt(rec.volume.value)} ${unit()} (${fmtShort(rec.volume.date)})` : '',
     ].filter(Boolean).join(' · ');
     return `
-        <h2 style="margin-top:16px">1RM estimado</h2>
-        <p class="muted">El peso máximo que podrías levantar una sola vez, calculado con tus series.</p>
+        <h2 style="margin-top:16px">1RM estimado · ${esc((S.exerciseNames().find((n) => n.key === ui.progKey) || {}).name || '')}${helpBtn('1rm')}</h2>
+        ${helpBox('1rm', 'El peso máximo que podrías levantar una sola vez, calculado con tus series de este ejercicio.')}
         <div class="stats">
           <div class="stat"><b>${last ? fmt(last.e1rm) + ' ' + unit() : '–'}</b><span>Último</span></div>
           <div class="stat"><b>${rec.e1rm ? fmt(rec.e1rm.e1rm) + ' ' + unit() : '–'}</b><span>Récord</span></div>
@@ -1508,6 +1522,8 @@
       }
 
       /* --- datos --- */
+      case 'help-ok': S.setPref('help.' + btn.dataset.help, 1); ui.helpOpen.delete(btn.dataset.help); render(); break;
+      case 'help-show': ui.helpOpen.add(btn.dataset.help); render(); break;
       case 'export-json':
         download(`rutina-gym-backup-${S.todayStr()}.json`, S.exportJSON(), 'application/json');
         S.markExported(); toast('Backup descargado'); if (ui.tab === 'history') render();
@@ -1635,7 +1651,7 @@
       if (s && el.value) { s.date = el.value; S.commit(); }
       return;
     }
-    if (el.dataset.f === 'prog') { ui.progKey = el.value; render(); return; }
+    if (el.dataset.f === 'prog') { ui.progKey = el.value; S.setPref('progKey', el.value); render(); return; }
     if (el.dataset.f === 'progday') { ui.progDay = el.value; render(); return; }
     if (el.dataset.f === 'progweek') { ui.progWeek = el.value; render(); return; }
     if (el.dataset.f === 'comment') {                // se guarda al salir del campo

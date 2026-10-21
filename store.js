@@ -899,6 +899,16 @@
 
   const exportJSON = () => JSON.stringify(state, null, 2);
 
+  /* Preferencias de ESTE dispositivo (no se sincronizan): ayudas ya leídas, ejercicio elegido en Progreso. */
+  const PREFS_KEY = 'gymapp.prefs';
+  const readPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) { return {}; } };
+  const getPref = (k) => readPrefs()[k];
+  function setPref(k, v) {
+    const p = readPrefs();
+    p[k] = v;
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* nada */ }
+  }
+
   /* Recordatorio de backup: cuántas sesiones terminadas había al último "Exportar backup". */
   const EXPORT_KEY = 'gymapp.lastExport';
   const finishedCount = () => state.sessions.filter((s) => s.finished).length;
@@ -1039,7 +1049,7 @@
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, cycles,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
-    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport,
+    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
     parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */

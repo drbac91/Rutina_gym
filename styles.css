@@ -262,7 +262,22 @@ body.gate { padding-bottom: 16px; }
 .login p { margin: 8px 8px 28px; }
 .login .login-sub { margin: 8px 8px 0; font-size: .8125rem; }
 .login .err { margin: 0 8px 20px; }
-.help { font-size: .8125rem; margin: 4px 0 8px; }
+.help-box {                 /* ayuda abierta: se cierra con "Entendido" y queda el ⓘ */
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--fill); border-radius: 12px; padding: 9px 6px 9px 12px; margin: 6px 0 12px;
+  font-size: .875rem; color: var(--muted); line-height: 1.35;
+}
+.help-box > div { flex: 1; min-width: 0; padding-top: 2px; }
+.help-box b { color: var(--text); }
+button.help-ok { flex: none; min-height: 32px; padding: 0 10px; border-radius: 99px; background: none; color: var(--accent); font-size: .875rem; }
+button.info {                /* ⓘ junto al título: vuelve a abrir la ayuda */
+  display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
+  width: 26px; height: 26px; min-height: 0; min-width: 0; padding: 0; margin-left: 8px;
+  border-radius: 50%; border: 1.5px solid var(--muted); background: none; color: var(--muted);
+  font: italic 700 .8125rem/1 Georgia, "Times New Roman", serif;
+}
+button.info::before { content: ""; position: absolute; inset: -9px; }   /* área de toque de 44 px */
+button.info { position: relative; }
 .link-btn { background: none; color: var(--muted); font-weight: 400; text-decoration: underline; min-height: 46px; margin-top: 6px; }
 .link-btn:active { background: none; }
 .err { color: var(--danger); font-size: .875rem; margin: 8px 0; }
@@ -299,7 +314,6 @@ body.gate { padding-bottom: 16px; }
 .sheet .stack { margin-top: 16px; }
 @keyframes sheet-fade { from { opacity: 0; } }
 @keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } }
-.hint { margin: -4px 4px 14px; }
 
 /* ---------- cambio de pestaña: aparece con suavidad ---------- */
 #view.enter > * { animation: enter .32s var(--ease-out) both; }
