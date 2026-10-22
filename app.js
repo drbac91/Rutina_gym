@@ -1806,6 +1806,22 @@
     const a = document.activeElement;
     return !!(a && $view.contains(a) && a.matches('input, textarea, select'));
   };
+  /* iOS: al cerrar el teclado el viewport a veces queda desplazado y la barra fija
+     queda flotando. Un scroll mínimo fuerza a Safari a recalcular el borde inferior. */
+  document.addEventListener('focusout', () => {
+    setTimeout(() => {
+      const a = document.activeElement;
+      if (a && a.matches && a.matches('input, textarea, select')) return;
+      const y = window.scrollY;
+      window.scrollTo(0, y + 1); window.scrollTo(0, y);
+    }, 120);
+  });
+  if (window.visualViewport) {
+    visualViewport.addEventListener('resize', () => {
+      if (Math.abs(visualViewport.offsetTop) > 1 && !typing()) window.scrollTo(0, window.scrollY);
+    });
+  }
+
   $view.addEventListener('focusout', () => {
     if (!renderPending) return;
     setTimeout(() => { if (!typing()) { renderPending = false; render(); } }, 350);
