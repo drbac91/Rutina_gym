@@ -1226,7 +1226,9 @@
   /** Hay nube disponible pero todavía no inició sesión ni eligió "sin cuenta". */
   const gated = () => !!(window.Cloud && Cloud.available && !Cloud.user && !Cloud.skipped);
 
+  let shownDay = '';   // día de la última pantalla dibujada (para detectar el cambio de día)
   function render() {
+    shownDay = S.todayStr();
     document.body.classList.toggle('gate', gated());
     updateSyncBadge();
     if (gated()) { $view.innerHTML = viewLogin(); return; }
@@ -1269,6 +1271,67 @@
     const exs = s ? idxs.map((i) => s.exercises[i]) : [];
     return { s, card, row, ex, st, j: row ? +row.dataset.set : -1, idxs, exs };
   }
+
+
+  /* ---------- un cambio de peso o reps pasa a las series siguientes ----------
+     Regla: solo a las series de ESE ejercicio que vienen después, sin ✓, y mientras sigan valiendo
+     lo mismo que la serie editada antes del cambio (se corta en la primera distinta). Así no se
+     pisa lo que ya editaste a mano ni se aplanan series escalonadas, y las anteriores no se tocan. */
+  const sameVal = (a, b) => (a == null || b == null ? a == null && b == null : Math.abs(a - b) < 1e-9);
+  /** Valor actual de un campo de la serie (f: weight|side|bricks|reps, con "d" adelante = drop). */
+  function fieldVal(st, ex, f) {
+    const isDrop = f.charAt(0) === 'd', key = isDrop ? f.slice(1) : f;
+    const t = isDrop ? (st.drop || {}) : st;
+    return key === 'side' ? S.sideOf(t, ex.bar) : key === 'bricks' ? S.bricksOf(t) : key === 'reps' ? (t.reps ?? null) : (t.weight ?? null);
+  }
+  function setField(st, ex, f, v) {
+    if (f === 'reps') st.reps = v;
+    else if (f === 'dreps') { st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps); st.drop.reps = v; }
+    else setWeight(st, ex, f, v);
+  }
+  /** Copia newV a las series siguientes que seguían a oldV. Anota en rec lo cambiado, para poder deshacer. */
+  function propagate(el, c, f, oldV, newV, rec) {
+    if (newV == null || Number.isNaN(newV) || sameVal(oldV, newV)) return;
+    const exEl = el.closest('[data-ex]');
+    for (let k = c.j + 1; k < c.ex.sets.length; k++) {
+      const st2 = c.ex.sets[k];
+      if (st2.done) continue;
+      if (!sameVal(fieldVal(st2, c.ex, f), oldV)) break;
+      if (!rec.some((r) => r.st === st2 && r.f === f)) rec.push({ st: st2, f, v: fieldVal(st2, c.ex, f) });
+      setField(st2, c.ex, f, newV);
+      const w = c.card && c.card.querySelector(`.setw[data-set="${k}"]`);
+      const scope = w && ((exEl && w.querySelector(`[data-ex="${exEl.dataset.ex}"]`)) || w);
+      const inp = scope && scope.querySelector(`input[data-f="${f}"]`);
+      if (inp && inp !== document.activeElement) {
+        inp.value = f.endsWith('reps') ? (newV ?? '') : fmt(newV);
+        if (!f.endsWith('reps')) updateTot(inp, st2, c.ex);
+      }
+    }
+    if (rec.length) S.commit();
+  }
+  /** Aviso con "Deshacer" de lo copiado a las series siguientes. */
+  function announceCopy(rec, c) {
+    if (!rec.length) return;
+    const n = new Set(rec.map((r) => r.st)).size;
+    const { s, ex } = c;
+    toast(`Se copió a ${n} serie${n > 1 ? 's' : ''} siguiente${n > 1 ? 's' : ''}`, { label: 'Deshacer', fn: () => {
+      if (currentSession() !== s) { toast('Ya no se puede deshacer'); return; }
+      rec.forEach((r) => setField(r.st, ex, r.f, r.v));
+      S.commit(); render();
+    } });
+  }
+  /** Seguimiento de lo que se está tecleando: "1" y después "12" siguen siendo UN solo cambio. */
+  let prop = null;
+  function flushProp() { if (prop) { announceCopy(prop.rec, prop.c); prop = null; } }
+  function trackChange(el, c, f, oldBefore, newV) {
+    // Si el valor cambió por otro lado desde la última tecla (deshacer, otra pestaña), arranca un cambio nuevo.
+    if (!prop || prop.st !== c.st || prop.f !== f || !sameVal(prop.cur, oldBefore)) { flushProp(); prop = { st: c.st, f, val: oldBefore, cur: oldBefore, rec: [], c }; }
+    prop.cur = Number.isNaN(newV) ? prop.cur : newV;
+    if (newV == null || Number.isNaN(newV)) return;      // campo vacío o inválido: no se copia nada
+    propagate(el, c, f, prop.val, newV, prop.rec);
+    prop.val = newV;
+  }
+  $view.addEventListener('focusout', flushProp);
 
   document.getElementById('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
@@ -1368,7 +1431,10 @@
         }
         const next = Math.max(0, Math.round((base + (act.endsWith('+') ? step : -step)) * 100) / 100);
         input.value = fmt(next); input.classList.remove('invalid');
+        flushProp();
+        const oldV = fieldVal(c.st, c.ex, f);
         setWeight(c.st, c.ex, f, next); S.commit(); updateTot(input, c.st, c.ex);
+        const rec = []; propagate(input, c, f, oldV, next, rec); announceCopy(rec, c);
         break;
       }
       case 'pick-bar':
@@ -1378,7 +1444,8 @@
         if (!c.s.exercises.some((ex) => ex.sets.some((st) => st.done))) { S.deleteSession(c.s.id); render(); window.scrollTo(0, 0); }
         break;
       case 'session-today':
-        c.s.date = S.todayStr(); S.commit(); render(); toast('Sesión pasada a hoy');
+        c.s.date = S.todayStr(); c.s.created = Date.now(); S.commit();   // hoy también es el nuevo inicio: la duración cuenta desde ahora
+        render(); toast('Sesión pasada a hoy');
         break;
       case 'toggle-drop':
         c.ex.drop = !c.ex.drop;
@@ -1598,12 +1665,14 @@
 
     // Sesión: peso / reps de una serie
     if (['weight', 'side', 'bricks', 'dweight', 'dside', 'dbricks'].includes(el.dataset.f)) {
-      const { st, ex } = ctx(el);
+      const c = ctx(el), { st, ex } = c;
       if (!st) return;
       const v = isThousands(el.value) ? NaN : S.parseNum(el.value);
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;                 // no guarda valores inválidos
+      const oldV = fieldVal(st, ex, el.dataset.f);
       setWeight(st, ex, el.dataset.f, v); S.commit(); updateTot(el, st, ex);
+      trackChange(el, c, el.dataset.f, oldV, v);
       return;
     }
     if (el.dataset.f === 'bar') {                  // "otra" barra: se aplica al salir del campo
@@ -1627,22 +1696,26 @@
       if (!Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;
+      const oldV = st.reps ?? null;
       st.reps = v;
       if (st.done && !(v > 0)) { st.done = false; c.exs.forEach(syncEx); refreshCard(c.card, c.exs); }   // sin reps no cuenta como hecha
       S.commit();
+      trackChange(el, c, 'reps', oldV, v);
       return;
     }
 
     // Sesión: peso / reps de la parte drop de una serie
     if (el.dataset.f === 'dreps') {
-      const { st, ex } = ctx(el);
+      const c = ctx(el), { st, ex } = c;
       if (!st) return;
       let v = S.parseNum(el.value);
       if (!Number.isNaN(v) && v != null && !Number.isInteger(v)) v = NaN;
       el.classList.toggle('invalid', Number.isNaN(v));
       if (Number.isNaN(v)) return;
+      const oldV = fieldVal(st, ex, 'dreps');
       st.drop = st.drop || S.blankDrop(ex.target && ex.target.reps);
       st.drop.reps = v; S.commit();
+      trackChange(el, c, 'dreps', oldV, v);
       return;
     }
 
@@ -1788,7 +1861,8 @@
     const reloaded = S.claimTab();
     const w = document.getElementById('tabwall');
     if (w) w.remove();
-    if (!reloaded) return;
+    // Cambió el día mientras la app seguía abierta: se redibuja para que aparezca el aviso de sesión de otro día.
+    if (!reloaded) { if (shownDay !== S.todayStr() && !typing()) render(); return; }
     if (window.Cloud && Cloud.resume) Cloud.resume();
     if (ui.editId && !S.find(S.state.sessions, ui.editId)) ui.editId = null;
     render();
