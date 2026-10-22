@@ -45,7 +45,7 @@
   /** Una serie es "efectiva" si te quedaron como mucho estas repeticiones en reserva (RIR). */
   const EFFECTIVE_RIR_MAX = 3;
   /** Duraciones mayores se descartan (probablemente la sesión quedó abierta). */
-  const MAX_SESSION_MINUTES = 240;
+  const MAX_SESSION_MINUTES = 360;
 
   /** Grupos musculares que se pueden asignar a cada ejercicio. */
   const MUSCLES = ['Pecho', 'Espalda', 'Hombros', 'B\u00edceps', 'Tr\u00edceps', 'Antebrazos', 'Core',
@@ -618,7 +618,9 @@
     if (!s) return null;
     s.exercises.forEach((ex) => { ex.sets = ex.sets.filter((st) => st.done); });
     s.exercises = s.exercises.filter((ex) => ex.sets.length > 0);
-    if (!s.finished && !s.finishedAt) s.finishedAt = Date.now();   // solo la primera vez (no al editar)
+    // Solo la primera vez (no al editar). Si la sesión quedó abierta más del tope, la hora de fin no
+    // es real (se terminó mucho después): no se guarda, para no inventar una duración.
+    if (!s.finished && !s.finishedAt && Date.now() - s.created <= MAX_SESSION_MINUTES * 60000) s.finishedAt = Date.now();
     s.finished = true;
     commit();
     return s;
