@@ -154,6 +154,7 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
   backdrop-filter: saturate(180%) blur(22px);
   border-top: .5px solid var(--sep);
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  transform: translateZ(0);
 }
 #tabs button {
   flex: 1; max-width: 120px; min-height: 52px; border-radius: 12px; background: none;
