@@ -193,7 +193,13 @@
     await auth.signOut();
   };
 
-  Cloud.skip = function () {
+  Cloud.skip = async function () {
+    // Los datos de este dispositivo son de una cuenta que cerró sesión: sin cuenta no se muestran.
+    // Siguen en la nube y en una copia automática que solo esa cuenta puede recuperar (listBackups).
+    if (store.get(OWNER_KEY)) {
+      await S.resetToSeed();
+      store.del(OWNER_KEY);
+    }
     Cloud.skipped = true;
     store.set(SKIP_KEY, '1');
     notify();

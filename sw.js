@@ -6,7 +6,7 @@
    IMPORTANTE: solo toca los archivos de la app y los scripts de las librerías
    (Chart.js y Firebase). El tráfico de datos y de login de Firebase pasa
    directo, sin caché: si no, se rompería la sincronización. */
-const CACHE = 'gym-v23';
+const CACHE = 'gym-v24';
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
@@ -25,8 +25,9 @@ self.addEventListener('install', (e) => {
       // cache:'reload' = pedir siempre a la red (GitHub Pages guarda los archivos ~10 min).
       await Promise.all(FILES.map((f) => c.add(new Request(f, { cache: 'reload' }))));
       // Las librerías son opcionales: si no hay red ahora, se cachean en el primer uso.
+      // mode 'cors': index.html las carga con integrity, y una respuesta opaca (no-cors) no pasaría esa verificación.
       for (const url of LIBS) {
-        try { await c.add(new Request(url, { mode: 'no-cors' })); } catch (err) { /* nada */ }
+        try { await c.add(new Request(url, { mode: 'cors' })); } catch (err) { /* nada */ }
       }
     }).then(() => self.skipWaiting())
   );
