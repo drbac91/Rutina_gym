@@ -61,6 +61,16 @@
     String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/\s+/g, ' ').trim();
 
+  /** Clave de un ejercicio para el historial: el nombre normalizado, siguiendo los alias que
+   *  eligió el usuario ("biceps maquina" -> "biceps en maquina"). Es lo que une las sesiones viejas
+   *  con el nombre nuevo sin tocarlas. */
+  const exKey = (name) => {
+    let k = normName(name);
+    const al = (state && state.exerciseAliases) || {};
+    for (let i = 0; i < 10 && al[k]; i++) k = al[k];
+    return k;
+  };
+
   /** Convierte texto a número aceptando coma o punto.
    *  Devuelve: número (>=0) | null si está vacío | NaN si es inválido/negativo. */
   function parseNum(v) {
@@ -210,6 +220,23 @@
     return out;
   }
 
+  /** Limpia los alias de ejercicios: { clave vieja: clave nueva }, sin vacíos, sin apuntarse a sí mismos
+   *  y sin dar vueltas (A -> B -> A). */
+  function normAliases(a) {
+    const out = {};
+    if (a && typeof a === 'object' && !Array.isArray(a)) {
+      Object.keys(a).sort().forEach((k) => {
+        const from = normName(k), to = normName(a[k]);
+        if (!from || !to || from === to) return;
+        let t = to;
+        for (let i = 0; i < 10 && out[t]; i++) t = out[t];
+        if (t === from) return;
+        out[from] = to;
+      });
+    }
+    return out;
+  }
+
   /** Limpia el registro de peso corporal: fechas válidas, kg razonables, uno por fecha, en orden. */
   function normBodyweights(list) {
     const byDate = new Map();
@@ -232,6 +259,8 @@
       // Comentarios por ejercicio para próximas sesiones: { nombreNormalizado: texto }.
       // Viven FUERA de routine.days, así "Importar solo la rutina" no los borra.
       exerciseComments: normComments(d.exerciseComments),
+      // Ejercicios unidos: { clave vieja: clave nueva }. También fuera de routine.
+      exerciseAliases: normAliases(d.exerciseAliases),
       // Registro de peso corporal [{ date, kg }]: cada valor rige hasta el siguiente. Fuera de routine.
       bodyweights: normBodyweights(d.bodyweights),
       routine: {
@@ -463,9 +492,9 @@
 
   /** Barras (kg) ya usadas en un ejercicio, para ofrecerlas como botones. */
   function barsUsed(name) {
-    const key = normName(name), out = new Set();
+    const key = exKey(name), out = new Set();
     state.sessions.forEach((s) => s.exercises.forEach((ex) => {
-      if (ex.bar != null && normName(ex.name) === key) out.add(ex.bar);
+      if (ex.bar != null && exKey(ex.name) === key) out.add(ex.bar);
     }));
     return [...out];
   }
@@ -519,6 +548,63 @@
     commit();
   }
 
+  /** Pasa un ejercicio a otro día (al final), conservando todo: nombre, series, notas y músculos.
+   *  Si estaba en una superserie, sale de ella. Devuelve true si lo movió. */
+  function moveExerciseToDay(dayId, exId, toDayId) {
+    const from = find(state.routine.days, dayId), to = find(state.routine.days, toDayId);
+    if (!from || !to || from === to) return false;
+    const i = from.exercises.findIndex((e) => e.id === exId);
+    if (i < 0) return false;
+    const ex = from.exercises.splice(i, 1)[0];
+    const g = ex.group;
+    if (g) {
+      ex.group = '';
+      const rest = from.exercises.filter((e) => e.group === g);
+      if (rest.length < 2) rest.forEach((e) => { e.group = ''; });   // una superserie de uno solo deja de serlo
+    }
+    to.exercises.push(ex);
+    commit();
+    return true;
+  }
+
+  /* ---------- ejercicios unidos (alias) ---------- */
+
+  /** Une el ejercicio `fromKey` con `toKey`: el historial viejo se ve junto con el nuevo. No cambia sesiones.
+   *  Los comentarios de los dos se juntan en el nuevo. Devuelve true si se unió. */
+  function joinExercises(fromKey, toKey) {
+    const from = exKey(fromKey), to = exKey(toKey);
+    if (!from || !to || from === to) return false;
+    backup('unir');
+    const al = state.exerciseAliases || (state.exerciseAliases = {});
+    al[from] = to;
+    const c = state.exerciseComments || (state.exerciseComments = {});
+    if (c[from]) {
+      c[to] = c[to] && c[to] !== c[from] ? (c[to] + '\n' + c[from]).slice(0, 2000) : c[from];
+      delete c[from];
+    }
+    commit();
+    return true;
+  }
+
+  /** Separa un ejercicio unido: vuelve a ser uno aparte. (El comentario que se juntó queda en el nuevo.) */
+  function splitExercise(fromKey) {
+    const al = state.exerciseAliases || {};
+    if (!al[fromKey]) return false;
+    delete al[fromKey];
+    commit();
+    return true;
+  }
+
+  /** Ejercicios que están unidos a `key`: [{ key, name }] (name = el último nombre con el que se guardó). */
+  function aliasesOf(key) {
+    const al = state.exerciseAliases || {};
+    return Object.keys(al).filter((f) => exKey(f) === key).map((f) => {
+      let name = f;
+      sortedSessions().forEach((s) => s.exercises.forEach((ex) => { if (normName(ex.name) === f) name = ex.name; }));
+      return { key: f, name };
+    });
+  }
+
   /* ---------- sesiones ---------- */
 
   const sortedSessions = () =>
@@ -530,14 +616,14 @@
    *  hizo, usa la más reciente de cualquier día. El historial para el gráfico sigue
    *  compartido por nombre. Devuelve { date, dayId, dayName, sets:[...hechas] } o null. */
   function lastEntry(name, excludeId, dayId) {
-    const key = normName(name);
+    const key = exKey(name);
     const list = sortedSessions().reverse();
     const search = (onlyDay) => {
       for (const s of list) {
         if (s.id === excludeId) continue;
         if (onlyDay && s.dayId !== dayId) continue;
         for (const ex of s.exercises) {
-          if (normName(ex.name) !== key) continue;
+          if (exKey(ex.name) !== key) continue;
           const done = ex.sets.filter((st) => st.done);
           if (done.length) {
             return { date: s.date, dayId: s.dayId, dayName: s.dayName, bar: ex.bar != null ? ex.bar : null,
@@ -635,11 +721,15 @@
 
   /** Lista de ejercicios con datos: [{ key, name }] ordenada alfabéticamente. */
   function exerciseNames() {
-    const map = new Map();
+    const map = new Map(), canon = new Set();
     sortedSessions().forEach((s) => {
       if (!s.finished) return;
       s.exercises.forEach((ex) => {
-        if (ex.sets.some((st) => st.done)) map.set(normName(ex.name), ex.name);  // queda el nombre más reciente
+        if (!ex.sets.some((st) => st.done)) return;
+        const k = exKey(ex.name);
+        // Queda el nombre más reciente; si hay ejercicios unidos, gana el nombre al que se unieron.
+        if (normName(ex.name) === k || !canon.has(k)) map.set(k, ex.name);
+        if (normName(ex.name) === k) canon.add(k);
       });
     });
     return Array.from(map, ([key, name]) => ({ key, name }))
@@ -654,7 +744,7 @@
       if (!s.finished) return;
       let max = 0, maxReps = 0, vol = 0, found = false;
       s.exercises.forEach((ex) => {
-        if (normName(ex.name) !== key) return;
+        if (exKey(ex.name) !== key) return;
         ex.sets.forEach((st) => {
           if (!st.done) return;
           found = true;
@@ -675,11 +765,11 @@
   /* ---------- comentarios por ejercicio ---------- */
 
   /** Comentario guardado para un ejercicio (por nombre normalizado, igual que el historial). */
-  const getExerciseComment = (name) => (state.exerciseComments || {})[normName(name)] || '';
+  const getExerciseComment = (name) => (state.exerciseComments || {})[exKey(name)] || '';
 
   /** Guarda (o borra, si queda vacío) el comentario de un ejercicio. Devuelve true si cambió. */
   function setExerciseComment(name, text) {
-    const key = normName(name);
+    const key = exKey(name);
     if (!key) return false;
     const v = String(text == null ? '' : text).trim().slice(0, 2000);
     const c = state.exerciseComments || (state.exerciseComments = {});
@@ -774,7 +864,7 @@
       if (!s.finished) return;
       let best = null;
       s.exercises.forEach((ex) => {
-        if (normName(ex.name) !== key) return;
+        if (exKey(ex.name) !== key) return;
         ex.sets.forEach((st) => {
           const v = st.done ? e1rm(st.weight, st.reps) : null;
           if (v != null && (!best || v > best.e1rm)) best = { date: s.date, e1rm: v, weight: st.weight, reps: st.reps };
@@ -861,7 +951,7 @@
   function muscleMap() {
     const m = new Map();
     state.routine.days.forEach((d) => d.exercises.forEach((e) => {
-      const k = normName(e.name);
+      const k = exKey(e.name);
       if (e.muscles && !m.has(k)) m.set(k, e.muscles);
     }));
     return m;
@@ -877,7 +967,7 @@
       s.exercises.forEach((ex) => {
         const n = ex.sets.filter((st) => st.done).length;
         if (!n) return;
-        const mu = mm.get(normName(ex.name));
+        const mu = mm.get(exKey(ex.name));
         if (!mu) { unassigned += n; return; }
         mu.primary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n));
         mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
@@ -982,11 +1072,12 @@
   /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
 
   /** Reemplaza la rutina con la de la nube, sin disparar una nueva subida. */
-  function setRoutine(routine, weightUnit, updatedAt, comments, bodyweights) {
+  function setRoutine(routine, weightUnit, updatedAt, comments, bodyweights, aliases) {
     state.routine = normalize({ routine }).routine;
     if (weightUnit) state.weightUnit = weightUnit;
     if (comments !== undefined) state.exerciseComments = normComments(comments);   // si no vienen, se conservan
     if (bodyweights !== undefined) state.bodyweights = normBodyweights(bodyweights); // ídem
+    if (aliases !== undefined) state.exerciseAliases = normAliases(aliases);         // ídem
     state.routineUpdatedAt = Number(updatedAt) || 0;
     commit(true);
   }
@@ -1090,7 +1181,8 @@
     sessions: sortedSessions,
     find,
     addDay, deleteDay, moveDay,
-    addExercise, deleteExercise, moveExercise, moveExerciseTo,
+    addExercise, deleteExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
+    exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
     bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, normMuscles,
