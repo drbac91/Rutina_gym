@@ -298,9 +298,9 @@
 
   /** Notas del ejercicio de la rutina (si existe una con el mismo nombre). */
   function exerciseNote(s, i, withName) {
-    const name = S.normName(s.exercises[i].name);
+    const name = S.exKey(s.exercises[i].name);
     const day = S.state.routine.days.find((d) => d.id === s.dayId);
-    const re = day && day.exercises.find((e) => S.normName(e.name) === name);
+    const re = day && day.exercises.find((e) => S.exKey(e.name) === name);
     if (!re || !re.notes) return '';
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
@@ -592,6 +592,14 @@
      PROGRESO
      ====================================================================== */
 
+  /** Ejercicios unidos al elegido, y el botón para unir otro (cuando un ejercicio quedó con dos nombres). */
+  function joinBlock() {
+    const joined = S.aliasesOf(ui.progKey);
+    return `<p class="muted" style="margin-top:8px">${joined.length ? 'Unido con: ' + joined.map((j) =>
+        `<b>${esc(j.name)}</b> <button class="link-btn" data-act="split-ex" data-key="${esc(j.key)}">Separar</button>`).join(' · ') + '<br>' : ''}`
+      + '<button class="link-btn" data-act="join-ex">¿Es el mismo que otro? Unir…</button></p>';
+  }
+
   function viewProgress() {
     const names = S.exerciseNames();
     if (!names.length) {
@@ -603,7 +611,7 @@
     if (!names.some((n) => n.key === ui.progKey)) {
       // Sin elección guardada: el primer ejercicio de la última sesión terminada (no el primero alfabético).
       const last = S.sessions().filter((s) => s.finished).pop();
-      const k = last && last.exercises[0] ? S.normName(last.exercises[0].name) : null;
+      const k = last && last.exercises[0] ? S.exKey(last.exercises[0].name) : null;
       ui.progKey = names.some((n) => n.key === k) ? k : names[0].key;
     }
     const { points, best } = S.progress(ui.progKey);
@@ -629,6 +637,7 @@
         <label for="p-ex">Ejercicio</label>
         <select id="p-ex" data-f="prog">${names.map((n) =>
           `<option value="${esc(n.key)}" ${n.key === ui.progKey ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>
+        ${joinBlock()}
         <div class="chart-box" style="margin-top:12px"><canvas id="chart"></canvas></div>
         <p class="muted" id="chart-msg"></p>
         <div class="stats">
@@ -976,10 +985,19 @@
     const pending = days.reduce((n, d) => n + d.exercises.filter((e) => isRevisar(e.notes)).length, 0);
     return `
       <h1>Rutina</h1>
-      <p class="muted">Cambiar la rutina no modifica tu historial. El historial se une por nombre de ejercicio: si renombrás uno, el historial viejo queda con el nombre anterior.</p>
+      <p class="muted">Cambiar la rutina no modifica tu historial. El historial se une por nombre de ejercicio: si renombrás uno, el historial viejo queda con el nombre anterior (si te pasa, unilos en Progreso con "Unir…").</p>
+      ${nameList()}
       ${pending ? `<div class="note revisar"><b>${pending} nota(s) para revisar.</b> Buscá las marcadas en amarillo.</div>` : ''}
       ${days.map((d, di) => dayCard(d, di, days.length)).join('')}
       <button class="block primary" data-act="add-day">+ Agregar día</button>`;
+  }
+
+  /** Nombres que ya existen (historial y rutina), para que al escribir un ejercicio se sugiera el mismo nombre. */
+  function nameList() {
+    const seen = new Map();
+    S.exerciseNames().forEach((n) => seen.set(S.exKey(n.name), n.name));
+    S.state.routine.days.forEach((d) => d.exercises.forEach((e) => { if (!seen.has(S.exKey(e.name))) seen.set(S.exKey(e.name), e.name); }));
+    return `<datalist id="ex-names">${[...seen.values()].map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
   }
 
   function dayCard(d, di, n) {
@@ -1016,7 +1034,7 @@
       </summary>
       <div class="body">
         <label>Nombre</label>
-        <input data-rf="name" value="${esc(e.name)}">
+        <input data-rf="name" list="ex-names" autocomplete="off" value="${esc(e.name)}">
         <div class="grid3">
           <div><label>Series</label><input data-rf="sets" inputmode="numeric" value="${e.sets}"></div>
           <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
@@ -1044,6 +1062,7 @@
           <button data-act="ex-down" ${ei === n - 1 ? 'disabled' : ''}>↓ Bajar</button>
           <button data-act="del-ex" class="danger">Borrar</button>
         </div>
+        ${S.state.routine.days.length > 1 ? '<button class="block" style="margin-top:8px" data-act="move-day">Mover a otro día</button>' : ''}
       </div>
     </details>`;
   }
@@ -1596,6 +1615,28 @@
       case 'ex-up': case 'ex-down':
         S.moveExercise(btn.closest('[data-day]').dataset.day, btn.closest('[data-id]').dataset.id, act === 'ex-up' ? -1 : 1);
         render();
+        break;
+      case 'move-day': {
+        const dayId = btn.closest('[data-day]').dataset.day, id = btn.closest('[data-id]').dataset.id;
+        const ex = S.find(S.find(S.state.routine.days, dayId).exercises, id);
+        const to = await choose(`Mover "${ex.name}"`, 'Pasa al final del día que elijas, con su nombre, series y notas. El historial no se toca.', [
+          ...S.state.routine.days.filter((d) => d.id !== dayId).map((d) => ({ label: d.name, value: d.id })),
+          { label: 'Cancelar', value: null }]);
+        if (to && S.moveExerciseToDay(dayId, id, to)) { ui.open.add(id); toast('Ejercicio movido'); render(); }
+        break;
+      }
+      case 'join-ex': {
+        const cur = S.exerciseNames().find((n) => n.key === ui.progKey);
+        const others = S.exerciseNames().filter((n) => n.key !== ui.progKey);
+        if (!cur || !others.length) { toast('No hay otro ejercicio para unir'); break; }
+        const pick = await choose(`Unir con "${cur.name}"`,
+          esc('Elegí el ejercicio que es el MISMO pero quedó con otro nombre. Su historial se va a ver junto con el de este. Tus sesiones no se modifican y lo podés separar después.'),
+          [...others.map((n) => ({ label: n.name, value: n.key })), { label: 'Cancelar', value: null }]);
+        if (pick && S.joinExercises(pick, ui.progKey)) { toast('Ejercicios unidos'); render(); }
+        break;
+      }
+      case 'split-ex':
+        if (S.splitExercise(btn.dataset.key)) { toast('Ejercicios separados'); render(); }
         break;
       case 'del-ex': {
         const dayId = btn.closest('[data-day]').dataset.day, id = btn.closest('[data-id]').dataset.id;
