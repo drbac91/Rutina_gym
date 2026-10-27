@@ -467,7 +467,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .opt small { display: block; color: var(--muted); font-size: .8125rem; margin-top: 2px; }
 .opt input[type="checkbox"] {
   -webkit-appearance: none; appearance: none; flex: 0 0 auto; margin: 0; cursor: pointer;
-  width: 51px; height: 31px; border-radius: 16px; position: relative;
+  width: 51px; height: 31px; min-height: 0; padding: 0; border: 0; border-radius: 16px; position: relative;   /* min-height/padding: sin esto el estilo general de los campos lo estira a 50 px y queda cuadrado */
   background: rgba(120, 120, 128, .42); transition: background .2s;
 }
 .opt input[type="checkbox"]::after {
