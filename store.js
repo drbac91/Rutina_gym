@@ -52,6 +52,7 @@
     'Core', 'Cu\u00e1driceps', 'Isquiotibiales', 'Gl\u00fateos', 'Aductores', 'Abductores', 'Pantorrillas', 'Cuello'];
   /** Nombres de la lista anterior que ya no se ofrecen pero se siguen leyendo (hay que revisarlos a mano): Espalda se partió en 4. */
   const LEGACY_MUSCLES = ['Espalda'];
+  const BACK_MUSCLES = ['Dorsales', 'Espalda media', 'Trapecios', 'Lumbar'];
 
   /* ---------- utilidades ---------- */
 
@@ -996,6 +997,25 @@
     return m ? Object.assign({}, m, { match: r.match, score: r.score }) : null;
   }
 
+  /** Para un ejercicio que todavía dice 'Espalda' (lista vieja): sus músculos con 'Espalda' cambiada por los de espalda
+   *  que sugiere la base. Conserva todo lo demás que cargó la persona. null si no hay sugerencia o no tiene 'Espalda'. */
+  function backReplacement(ex) {
+    const cur = ex.muscles;
+    if (!cur || !(cur.primary.includes('Espalda') || cur.secondary.includes('Espalda'))) return null;
+    const sug = suggestMuscles(ex.name);
+    if (!sug) return null;
+    const bp = sug.primary.filter((x) => BACK_MUSCLES.includes(x)), bs = sug.secondary.filter((x) => BACK_MUSCLES.includes(x));
+    if (!bp.length && !bs.length) return null;
+    const wasPrimary = cur.primary.includes('Espalda');
+    const addP = wasPrimary ? (bp.length ? bp : bs) : [];
+    const addS = wasPrimary ? (bp.length ? bs : []) : [...bp, ...bs];
+    return normMuscles({
+      primary: [...cur.primary.filter((x) => x !== 'Espalda'), ...addP],
+      secondary: [...cur.secondary.filter((x) => x !== 'Espalda'), ...addS],
+    });
+  }
+  const hasLegacyMuscle = (ex) => !!ex.muscles && LEGACY_MUSCLES.some((m) => ex.muscles.primary.includes(m) || ex.muscles.secondary.includes(m));
+
   /** Series por músculo en una semana: principal = 1, secundario = SECONDARY_MUSCLE_FACTOR.
    *  Los ejercicios sin músculos asignados se suman en "unassigned". */
   function muscleSets(week) {
@@ -1238,11 +1258,11 @@
     claimTab, isActive: () => active,
     sessions: sortedSessions,
     find,
-    suggestMuscles,
+    suggestMuscles, backReplacement, hasLegacyMuscle,
     addDay, deleteDay, reinsertDay, moveDay,
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
-    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
+    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
     bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
