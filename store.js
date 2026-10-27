@@ -1043,7 +1043,7 @@
 
   /* Opciones de visualización de ESTE dispositivo (no se sincronizan ni tocan los datos):
      esconder algo nunca borra lo guardado. Cada opción trae su valor de fábrica. */
-  const OPTION_DEFAULTS = { rir: true, help: true };
+  const OPTION_DEFAULTS = { rir: true, rirPrev: true, help: true };
   function opt(k) { const v = getPref('opt.' + k); return v === undefined ? !!OPTION_DEFAULTS[k] : !!v; }
   function setOpt(k, on) { if (k in OPTION_DEFAULTS) setPref('opt.' + k, !!on); }
   /** Vuelve a mostrar las ayudas ⓘ que ya se leyeron. */
