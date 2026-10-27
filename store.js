@@ -247,6 +247,9 @@
     return [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, kg]) => ({ date, kg }));
   }
 
+  /** La unidad de peso solo puede ser 'kg' o 'lb': se muestra en pantalla y no debe traer texto ajeno. */
+  const normUnit = (u) => (u === 'lb' ? 'lb' : 'kg');
+
   /** Valida y limpia un objeto con formato rutina.json. Lanza Error en español. */
   function normalize(d) {
     if (!d || typeof d !== 'object') throw new Error('El archivo no es un JSON de rutina válido.');
@@ -254,7 +257,7 @@
     if (!Array.isArray(days)) throw new Error('Falta "routine.days" en el archivo.');
     return {
       version: 1,
-      weightUnit: d.weightUnit || 'kg',
+      weightUnit: normUnit(d.weightUnit),
       routineUpdatedAt: Number(d.routineUpdatedAt) || 0,   // marca de tiempo para la sincronización
       // Comentarios por ejercicio para próximas sesiones: { nombreNormalizado: texto }.
       // Viven FUERA de routine.days, así "Importar solo la rutina" no los borra.
@@ -1074,7 +1077,7 @@
   /** Reemplaza la rutina con la de la nube, sin disparar una nueva subida. */
   function setRoutine(routine, weightUnit, updatedAt, comments, bodyweights, aliases) {
     state.routine = normalize({ routine }).routine;
-    if (weightUnit) state.weightUnit = weightUnit;
+    if (weightUnit) state.weightUnit = normUnit(weightUnit);
     if (comments !== undefined) state.exerciseComments = normComments(comments);   // si no vienen, se conservan
     if (bodyweights !== undefined) state.bodyweights = normBodyweights(bodyweights); // ídem
     if (aliases !== undefined) state.exerciseAliases = normAliases(aliases);         // ídem
