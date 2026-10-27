@@ -6,7 +6,7 @@
    IMPORTANTE: solo toca los archivos de la app y los scripts de las librerías
    (Chart.js y Firebase). El tráfico de datos y de login de Firebase pasa
    directo, sin caché: si no, se rompería la sincronización. */
-const CACHE = 'gym-v34';
+const CACHE = 'gym-v35';
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
@@ -15,7 +15,7 @@ const LIBS = [
   FB + 'firebase-firestore-compat.js',
 ];
 const FILES = [
-  './', 'index.html', 'styles.css', 'store.js', 'cloud.js', 'app.js', 'seed.js',
+  './', 'index.html', 'styles.css', 'muscles.js', 'store.js', 'cloud.js', 'app.js', 'seed.js',
   'firebase-config.js', 'rutina.json', 'ejemplo.json', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
 ];
 
