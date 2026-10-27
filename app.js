@@ -28,7 +28,7 @@
 
   /** Número a texto con coma decimal (es-AR). */
   const fmt = (n) => (n == null || Number.isNaN(n) ? '' : String(Math.round(n * 100) / 100).replace('.', ','));
-  const unit = () => S.state.weightUnit;
+  const unit = () => (S.state.weightUnit === 'lb' ? 'lb' : 'kg');   // nunca texto libre: se pega en HTML
 
   /** "2026-10-05" -> Date local (evita el corrimiento por zona horaria). */
   const toDate = (str) => { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); };
