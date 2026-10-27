@@ -1274,6 +1274,7 @@
   const BACKUP_WHY = {
     import: 'antes de restaurar un backup', 'reset-routine': 'antes de volver a la rutina de ejemplo',
     cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
+    'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio',
   };
   /** "copia del 20 oct, 21:40" (las copias de versiones viejas no tienen fecha). */
   const copyName = (at) => (at ? 'copia del ' + new Date(at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'copia anterior');
@@ -1664,18 +1665,31 @@
         go('train');
         break;
       }
-      case 'del-session':
-        if (confirm('¿Borrar esta sesión del historial? No se puede deshacer.')) {
-          S.deleteSession(btn.closest('[data-sid]').dataset.sid); toast('Sesión borrada'); render();
+      case 'del-session': {
+        const s = S.find(S.state.sessions, btn.closest('[data-sid]').dataset.sid);
+        if (s && confirm('¿Borrar esta sesión del historial? Si te arrepentís, tenés unos segundos para deshacerlo.')) {
+          S.backup('borrar sesión');
+          S.deleteSession(s.id); render();
+          toast('Sesión borrada', { label: 'Deshacer', fn: () => {
+            toast(S.reinsertSession(s) ? 'Sesión recuperada ✓' : 'Ya no se puede deshacer'); render();
+          } });
         }
         break;
+      }
 
       /* --- rutina --- */
       case 'add-day': S.addDay(); render(); break;
       case 'day-up': case 'day-down': S.moveDay(btn.closest('[data-day]').dataset.day, act === 'day-up' ? -1 : 1); render(); break;
       case 'del-day': {
         const d = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
-        if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra.`)) { S.deleteDay(d.id); render(); }
+        if (confirm(`¿Borrar "${d.name}" y sus ${d.exercises.length} ejercicios? El historial no se borra. Si te arrepentís, tenés unos segundos para deshacerlo.`)) {
+          const index = S.state.routine.days.findIndex((x) => x.id === d.id);
+          S.backup('borrar día');
+          S.deleteDay(d.id); render();
+          toast(`"${d.name}" borrado`, { label: 'Deshacer', fn: () => {
+            toast(S.reinsertDay(d, index) ? 'Día recuperado ✓' : 'Ya no se puede deshacer'); render();
+          } });
+        }
         break;
       }
       case 'bw-save': {
@@ -1758,7 +1772,14 @@
       case 'del-ex': {
         const dayId = btn.closest('[data-day]').dataset.day, id = btn.closest('[data-id]').dataset.id;
         const ex = S.find(S.find(S.state.routine.days, dayId).exercises, id);
-        if (confirm(`¿Borrar "${ex.name}" de la rutina? El historial no se borra.`)) { S.deleteExercise(dayId, id); render(); }
+        if (confirm(`¿Borrar "${ex.name}" de la rutina? El historial no se borra. Si te arrepentís, tenés unos segundos para deshacerlo.`)) {
+          const day = S.find(S.state.routine.days, dayId), index = day.exercises.findIndex((x) => x.id === id);
+          S.backup('borrar ejercicio');
+          S.deleteExercise(dayId, id); render();
+          toast(`"${ex.name}" borrado`, { label: 'Deshacer', fn: () => {
+            toast(S.reinsertExercise(dayId, ex, index) ? 'Ejercicio recuperado ✓' : 'Ya no se puede deshacer'); render();
+          } });
+        }
         break;
       }
 

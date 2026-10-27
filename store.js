@@ -451,6 +451,13 @@
     state.routine.days = state.routine.days.filter((d) => d.id !== id);
     commit();
   }
+  /** Deshacer un borrado: vuelve a poner el día en su lugar. */
+  function reinsertDay(day, index) {
+    if (find(state.routine.days, day.id)) return false;
+    state.routine.days.splice(Math.min(index, state.routine.days.length), 0, day);
+    commit();
+    return true;
+  }
   function moveDay(id, dir) {
     move(state.routine.days, state.routine.days.findIndex((d) => d.id === id), dir);
     commit();
@@ -538,6 +545,14 @@
   function deleteExercise(dayId, exId) {
     const day = find(state.routine.days, dayId);
     if (day) { day.exercises = day.exercises.filter((e) => e.id !== exId); commit(); }
+  }
+  /** Deshacer un borrado: vuelve a poner el ejercicio en su lugar (false si el día ya no existe). */
+  function reinsertExercise(dayId, ex, index) {
+    const day = find(state.routine.days, dayId);
+    if (!day || find(day.exercises, ex.id)) return false;
+    day.exercises.splice(Math.min(index, day.exercises.length), 0, ex);
+    commit();
+    return true;
   }
   function moveExercise(dayId, exId, dir) {
     const day = find(state.routine.days, dayId);
@@ -721,6 +736,13 @@
   function deleteSession(id) {
     state.sessions = state.sessions.filter((s) => s.id !== id);
     commit();
+  }
+  /** Deshacer un borrado: vuelve a poner la sesión en el historial. */
+  function reinsertSession(s) {
+    if (find(state.sessions, s.id)) return false;
+    state.sessions.push(s);
+    commit();
+    return true;
   }
 
   /* ---------- progresión ---------- */
@@ -1205,15 +1227,15 @@
     claimTab, isActive: () => active,
     sessions: sortedSessions,
     find,
-    addDay, deleteDay, moveDay,
-    addExercise, deleteExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
+    addDay, deleteDay, reinsertDay, moveDay,
+    addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
     bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
-    lastEntry, startSession, finishSession, deleteSession,
+    lastEntry, startSession, finishSession, deleteSession, reinsertSession,
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
