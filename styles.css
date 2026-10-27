@@ -487,3 +487,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .ex-head:has(.pick) h3 { flex: 1; margin: 0; }
 .pick { display: flex; align-items: center; min-width: 32px; min-height: 44px; }
 .pick input { width: 22px; height: 22px; margin: 0; }
+
+/* RPE por ejercicio */
+.rpe-row { margin-top: 8px; }
+.rpe-row label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .875rem; color: var(--muted); }
+.rpe-row select { min-width: 72px; }
+.hist-extra { white-space: nowrap; }

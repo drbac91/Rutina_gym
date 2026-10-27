@@ -221,8 +221,17 @@
           <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
+        ${rpeRow(ex)}
         ${commentBox(ex)}
       </section>`;
+  }
+
+  /** Esfuerzo del ejercicio (RPE 1-10). Solo si la opción está prendida. */
+  function rpeRow(ex) {
+    if (!S.opt('rpe')) return '';
+    const vals = []; for (let v = 5; v <= 10; v += 0.5) vals.push(v);
+    return `<div class="rpe-row"><label>${esc(ex.name)} · RPE (qué tan duro fue, 10 = al límite)
+      <select data-f="rpe" aria-label="RPE de ${esc(ex.name)}"><option value="">–</option>${vals.map((v) => `<option value="${v}" ${ex.rpe === v ? 'selected' : ''}>${fmt(v)}</option>`).join('')}</select></label></div>`;
   }
 
   /** Tarjeta de superserie: 2+ ejercicios que se alternan. Cada serie lleva una línea por
@@ -258,7 +267,7 @@
           </div>
         </div>`);
     }
-    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('');
+    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('') + idxs.map((i) => `<div data-ex="${i}">${rpeRow(s.exercises[i])}</div>`).join('');
     const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
     return `
       <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
@@ -590,7 +599,10 @@
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
-        return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}</div>` : '';
+        if (!sets) return '';
+        const best = S.opt('e1rmHist') ? ex.sets.filter((x) => x.done).reduce((m, x) => Math.max(m, S.e1rm(x.weight, x.reps) || 0), 0) : 0;
+        const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
+        return `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">· ${extra}</span>` : ''}</div>`;
       }).join('');
       return `
       <article class="card ${sel && sel.has(s.id) ? 'picked' : ''}" data-sid="${esc(s.id)}">
@@ -1186,6 +1198,8 @@
         <p class="muted">Elegí qué ver. Son de este dispositivo: en tu otro teléfono o compu se eligen aparte. Esconder algo no borra lo que ya cargaste.</p>
         ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
         ${row('rirPrev', 'RIR de la vez anterior', 'Junto a "Última vez", muestra el RIR que anotaste. Solo se ve si el RIR está prendido.')}
+        ${row('rpe', 'RPE por ejercicio', 'Un casillero por ejercicio para anotar qué tan duro fue (1 a 10). También se ve en el Historial.')}
+        ${row('e1rmHist', '1RM estimado en el Historial', 'Una cifra chica por ejercicio: el 1RM de tu mejor serie de hasta 10 repeticiones.')}
         ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
         <button class="block" data-act="help-reset">Volver a mostrar las ayudas leídas</button>
       </div>`;
@@ -1877,6 +1891,11 @@
       const id = el.closest('[data-sid]').dataset.sid;
       el.checked ? ui.sel.add(id) : ui.sel.delete(id);
       render(); return;
+    }
+    if (el.dataset.f === 'rpe') {
+      const { ex } = ctx(el);
+      if (ex) S.setExRpe(ex, el.value === '' ? null : Number(el.value));
+      return;
     }
     if (el.dataset.opt) { S.setOpt(el.dataset.opt, el.checked); render(); return; }
     if (el.dataset.f === 'date') {

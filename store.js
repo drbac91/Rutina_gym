@@ -186,7 +186,8 @@
       exercises: (Array.isArray(s.exercises) ? s.exercises : []).map((ex) => {
         const t = (ex && ex.target) || {};
         const w = t.weight == null ? null : Number(t.weight);
-        return {
+        const rpe = ex && ex.rpe != null ? Number(ex.rpe) : null;
+        const o = {
           name: String((ex && ex.name) || 'Ejercicio'),
           done: !!(ex && ex.done),
           drop: !!(ex && ex.drop),             // este ejercicio se registra con drop set
@@ -201,6 +202,8 @@
           },
           sets: (ex && Array.isArray(ex.sets) ? ex.sets : []).map(normSet),
         };
+        // esfuerzo del ejercicio, de 1 a 10 en pasos de 0,5 (opcional: solo se guarda con valor)
+        return withOptional(o, 'rpe', Number.isFinite(rpe) && rpe >= 1 && rpe <= 10 ? Math.round(rpe * 2) / 2 : null);
       }),
     };
     const bw = Number(s.bodyweight), fin = Number(s.finishedAt);
@@ -1021,6 +1024,13 @@
   }
 
   /** Guarda el RIR de una serie (vacío = se borra). */
+  /** RPE del ejercicio (1 a 10, pasos de 0,5); vacío lo quita. */
+  function setExRpe(ex, rpe) {
+    delete ex.rpe;
+    if (rpe != null) ex.rpe = rpe;
+    commit();
+  }
+
   function setSetRir(st, rir) {
     delete st.rir;
     if (rir != null) st.rir = rir;
@@ -1043,7 +1053,7 @@
 
   /* Opciones de visualización de ESTE dispositivo (no se sincronizan ni tocan los datos):
      esconder algo nunca borra lo guardado. Cada opción trae su valor de fábrica. */
-  const OPTION_DEFAULTS = { rir: true, rirPrev: true, help: true };
+  const OPTION_DEFAULTS = { rir: true, rirPrev: true, rpe: false, e1rmHist: true, help: true };
   function opt(k) { const v = getPref('opt.' + k); return v === undefined ? !!OPTION_DEFAULTS[k] : !!v; }
   function setOpt(k, on) { if (k in OPTION_DEFAULTS) setPref('opt.' + k, !!on); }
   /** Vuelve a mostrar las ayudas ⓘ que ya se leyeron. */
@@ -1200,7 +1210,7 @@
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
-    bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, normMuscles,
+    bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession,
