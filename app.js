@@ -628,7 +628,9 @@
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
         if (!sets) return '';
         const best = S.opt('e1rmHist') ? ex.sets.filter((x) => x.done).reduce((m, x) => Math.max(m, S.e1rm(x.weight, x.reps) || 0), 0) : 0;
-        const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
+        const rirs = S.opt('rir') ? ex.sets.filter((x) => x.done && x.rir != null).map((x) => x.rir) : [];
+        const rirTxt = rirs.length ? `RIR ${Math.min(...rirs) === Math.max(...rirs) ? Math.min(...rirs) : Math.min(...rirs) + '–' + Math.max(...rirs)}` : '';
+        const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', rirTxt, S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
         return `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">· ${extra}</span>` : ''}</div>`;
       }).join('');
       return `
