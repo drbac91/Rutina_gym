@@ -1027,6 +1027,10 @@
         return d.exercises.map((e, ei) => exerciseEditor(e, ei, d.exercises.length, inSS.has(ei),
           ei < d.exercises.length - 1 && !!e.group && d.exercises[ei + 1].group === e.group)).join('');
       })()}
+      <div class="row" style="margin-top:8px">
+        <button data-act="open-all">Desplegar todos</button>
+        <button data-act="close-all">Plegar todos</button>
+      </div>
       <button class="block" style="margin-top:8px" data-act="add-ex">+ Agregar ejercicio</button>
     </section>`;
   }
@@ -1047,11 +1051,11 @@
       </summary>
       <div class="body">
         <label>Nombre</label>
-        <input data-rf="name" list="ex-names" autocomplete="off" value="${esc(e.name)}">
+        <input data-rf="name" enterkeyhint="next" list="ex-names" autocomplete="off" value="${esc(e.name)}">
         <div class="grid3">
-          <div><label>Series</label><input data-rf="sets" inputmode="numeric" value="${e.sets}"></div>
-          <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
-          <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
+          <div><label>Series</label><input data-rf="sets" enterkeyhint="next" inputmode="numeric" value="${e.sets}"></div>
+          <div><label>Reps (texto)</label><input data-rf="reps" enterkeyhint="next" value="${esc(e.reps)}" placeholder="10-10"></div>
+          <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" enterkeyhint="next" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
         <label>¿Cómo se carga el peso? (con barra: discos por lado · con bloques: cantidad × ${fmt(S.BRICK_KG)} kg)</label>
         <div class="chips">
@@ -1637,6 +1641,11 @@
         ui.open.add(id); render();
         break;
       }
+      case 'open-all': case 'close-all': {
+        const day = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
+        day.exercises.forEach((x) => (act === 'open-all' ? ui.open.add(x.id) : ui.open.delete(x.id)));
+        render(); break;
+      }
       case 'add-ex': {
         const ex = S.addExercise(btn.closest('[data-day]').dataset.day);
         ui.open.add(ex.id); render();
@@ -1884,10 +1893,20 @@
      (El teclado numérico ya se abre solo por inputmode="decimal"/"numeric".) */
   $view.addEventListener('focusin', (e) => {
     const el = e.target;
-    if (el.matches && el.matches('.setw input[data-f]')) {
+    if (el.matches && el.matches('.setw input[data-f], input[data-rf]')) {
       el.dataset.justFocused = '1';
       setTimeout(() => { try { el.select(); el.setSelectionRange(0, 99); } catch (err) { /* nada */ } }, 0);
     }
+  });
+  /* En el editor de Rutina, Enter pasa al campo siguiente (nombre → series → reps → peso → notas). */
+  $view.addEventListener('keydown', (e) => {
+    const el = e.target;
+    if (e.key !== 'Enter' || !el.matches || !el.matches('input[data-rf]')) return;
+    const fields = [...el.closest('details.exe').querySelectorAll('[data-rf]')];
+    const next = fields[fields.indexOf(el) + 1];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
   });
   /* El "soltar" del mismo toque que dio el foco movía el cursor y deshacía la selección
      (lo nuevo se mezclaba con lo viejo: "10" → "18.50"). */
