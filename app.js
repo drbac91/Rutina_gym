@@ -104,6 +104,29 @@
     });
   }
 
+  /** Recorrido de primer uso: pasos cortos, uno por ventana. Se puede salir en cualquier momento. */
+  const TOUR = [
+    ['1 de 5 · Entrenar', 'Elegí el día (la app te propone el que toca). Cargá peso y repeticiones de cada serie y tocá ✓. Arriba de cada ejercicio ves "Última vez" para saber qué superar.'],
+    ['2 de 5 · Terminar', 'Al final tocá "Terminar". Si quedaron series sin ✓, te pregunto qué hacer con ellas: nada se borra si vos no lo elegís.'],
+    ['3 de 5 · Historial y Progreso', 'En Historial ves tus sesiones y podés mandar varios días por WhatsApp. En Progreso hay gráficos, tu 1RM estimado y los ejercicios que se estancaron.'],
+    ['4 de 5 · Rutina', 'Cambiá ejercicios, series, repeticiones y notas. Con Enter pasás al campo siguiente. Cambiar la rutina no toca tu historial.'],
+    ['5 de 5 · Datos y Opciones', 'Tus datos viven en este dispositivo: exportá un backup de vez en cuando, o entrá con Google para sincronizarlos. En Opciones prendés o apagás RIR, RPE, 1RM y las ayudas.'],
+  ];
+  async function runTour() {
+    for (let i = 0; i < TOUR.length; i++) {
+      const last = i === TOUR.length - 1;
+      const v = await choose(TOUR[i][0], esc(TOUR[i][1]), [
+        { label: last ? 'Listo, empezar' : 'Siguiente', value: 'next', cls: 'primary' },
+        ...(i ? [{ label: 'Anterior', value: 'back' }] : []),
+        ...(last ? [] : [{ label: 'Salir', value: 'exit' }]),
+      ]);
+      if (v === 'back') i -= 2;
+      else if (v !== 'next') break;
+    }
+    S.setPref('tour', 1);
+    if (ui.tab === 'train') render();
+  }
+
   /** Descarga un archivo generado en el navegador. */
   function download(filename, text, mime) {
     const url = URL.createObjectURL(new Blob([text], { type: mime }));
@@ -164,7 +187,11 @@
     // Debajo de cada día, cuándo se hizo por última vez (así se ve qué día quedó atrás).
     const when = (d) => (!trained ? '' : stats[d.id].last
       ? ` · ${agoText(stats[d.id].last.date)}` : ' · <span class="warn-txt">nunca</span>');
-    return `<h1>¿Qué día entrenás?</h1>${exampleNote()}` + days.map((d) => `
+    const tourCard = !trained && !S.getPref('tour') ? `
+      <div class="note"><b>¿Primera vez?</b> Hay un recorrido de 1 minuto.
+        <div class="row" style="margin-top:8px"><button class="primary" data-act="tour">Ver recorrido</button>
+        <button data-act="tour-skip">Ahora no</button></div></div>` : '';
+    return `<h1>¿Qué día entrenás?</h1>${tourCard}${exampleNote()}` + days.map((d) => `
       <button class="day-btn block ${d.id === next ? 'primary' : ''}" style="margin-bottom:10px" data-act="start" data-day="${esc(d.id)}">
         <span>${esc(d.name)}<small>${d.exercises.length} ejercicios${when(d)}</small></span>
         <span>${d.id === next ? 'Sugerido hoy ▸' : '▸'}</span>
@@ -1201,6 +1228,7 @@
         ${row('rpe', 'RPE por ejercicio', 'Un casillero por ejercicio para anotar qué tan duro fue (1 a 10). También se ve en el Historial.')}
         ${row('e1rmHist', '1RM estimado en el Historial', 'Una cifra chica por ejercicio: el 1RM de tu mejor serie de hasta 10 repeticiones.')}
         ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
+        <button class="block" data-act="tour">Ver el recorrido de primer uso</button>
         <button class="block" data-act="help-reset">Volver a mostrar las ayudas leídas</button>
       </div>`;
   }
@@ -1757,6 +1785,8 @@
 
       /* --- datos --- */
       case 'help-reset': S.resetHelp(); ui.helpOpen.clear(); toast(S.opt('help') ? 'Las ayudas vuelven a verse' : 'Listo. Para verlas, prendé "Ayudas y explicaciones"'); render(); break;
+      case 'tour': runTour(); break;
+      case 'tour-skip': S.setPref('tour', 1); render(); break;
       case 'help-ok': S.setPref('help.' + btn.dataset.help, 1); ui.helpOpen.delete(btn.dataset.help); render(); break;
       case 'help-show': ui.helpOpen.add(btn.dataset.help); render(); break;
       case 'export-json':
