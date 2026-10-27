@@ -460,3 +460,36 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
   .stepper input, .ssset .stepper input { margin: 0 2px; font-size: 1rem; }
   .ex .row button { padding: 0 8px; font-size: 1rem; }   /* "✓ Completar" en una sola línea */
 }
+
+/* Opciones (Datos): una fila por opción, con interruptor a la derecha */
+.opt { display: flex; align-items: center; gap: 12px; min-height: 52px; cursor: pointer; }
+.opt > span { flex: 1; min-width: 0; }
+.opt small { display: block; color: var(--muted); font-size: .8125rem; margin-top: 2px; }
+.opt input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none; flex: 0 0 auto; margin: 0; cursor: pointer;
+  width: 51px; height: 31px; border-radius: 16px; position: relative;
+  background: rgba(120, 120, 128, .42); transition: background .2s;
+}
+.opt input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); transition: transform .2s var(--ease-out, ease-out);
+}
+.opt input[type="checkbox"]:checked { background: #34c759; }
+.opt input[type="checkbox"]:checked::after { transform: translateX(20px); }
+.opt input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .opt input[type="checkbox"], .opt input[type="checkbox"]::after { transition: none; } }
+
+/* Historial: elegir días para compartir */
+.sharebar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin: 8px 0; background: var(--fill); border-radius: var(--radius-sm); }
+.sharebar span { flex: 1; }
+.card.picked { outline: 2px solid var(--accent, #0a84ff); }
+.ex-head:has(.pick) { align-items: center; }
+.ex-head:has(.pick) h3 { flex: 1; margin: 0; }
+.pick { display: flex; align-items: center; min-width: 32px; min-height: 44px; }
+.pick input { width: 22px; height: 22px; margin: 0; }
+
+/* RPE por ejercicio */
+.rpe-row { margin-top: 8px; }
+.rpe-row label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .875rem; color: var(--muted); }
+.rpe-row select { min-width: 72px; }
+.hist-extra { white-space: nowrap; }
