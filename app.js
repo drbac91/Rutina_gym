@@ -182,12 +182,21 @@
     ? `<div class="note"><b>Esta es una rutina de ejemplo.</b> Cambiala en la pestaña Rutina o cargá la tuya en Datos → Importar rutina. Tocá un día para empezar a anotar.</div>`
     : '');
 
+  /** RIR de la vez anterior, solo si se cargó y las opciones lo permiten. Igual en todas: "RIR 2 en todas". */
+  function prevRir(sets) {
+    if (!S.opt('rir') || !S.opt('rirPrev') || !sets.some((st) => st.rir != null)) return null;
+    const all = sets.every((st) => st.rir != null && st.rir === sets[0].rir);
+    return all ? { all: sets[0].rir } : { each: sets.map((st) => (st.rir != null ? st.rir : null)) };
+  }
+
   /** Texto "Última vez (fecha · otro día): series" de un ejercicio. */
   function prevText(s, ex) {
     const last = S.lastEntry(ex.name, s.id, s.dayId);
     if (!last) return 'Sin registros previos';
     const otherDay = last.dayId !== s.dayId && last.dayName ? ' · ' + esc(last.dayName) : '';
-    return `Última vez (${fmtShort(last.date)}${otherDay}): ` + last.sets.map(fmtSet).join(' · ');
+    const r = prevRir(last.sets);
+    const body = last.sets.map((st, i) => fmtSet(st) + (r && r.each && r.each[i] != null ? ` (RIR ${r.each[i]})` : '')).join(' · ');
+    return `Última vez (${fmtShort(last.date)}${otherDay}): ` + body + (r && r.all != null ? ` · RIR ${r.all} en todas` : '');
   }
 
   const targetText = (ex) => {
@@ -1139,6 +1148,7 @@
         <h2>Opciones</h2>
         <p class="muted">Elegí qué ver. Son de este dispositivo: en tu otro teléfono o compu se eligen aparte. Esconder algo no borra lo que ya cargaste.</p>
         ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
+        ${row('rirPrev', 'RIR de la vez anterior', 'Junto a "Última vez", muestra el RIR que anotaste. Solo se ve si el RIR está prendido.')}
         ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
         <button class="block" data-act="help-reset">Volver a mostrar las ayudas leídas</button>
       </div>`;
