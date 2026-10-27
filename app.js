@@ -1083,10 +1083,12 @@
 
   /** Aviso de arriba: ejercicios que todavía dicen "Espalda" (lista vieja de músculos). */
   function backBanner() {
-    const all = S.state.routine.days.flatMap((d) => d.exercises).filter((x) => S.hasLegacyMuscle(x));
-    if (!all.length) return '';
-    const fix = all.filter((x) => S.backReplacement(x)).length;
-    return `<div class="note revisar"><b>${all.length} ejercicio(s) con "Espalda" por revisar.</b> Ahora se separa en Dorsales, Espalda media, Trapecios y Lumbar.
+    const found = S.state.routine.days.flatMap((d) => d.exercises.filter((x) => S.hasLegacyMuscle(x)).map((x) => ({ d, x })));
+    if (!found.length) return '';
+    const fix = found.filter((f) => S.backReplacement(f.x)).length;
+    return `<div class="note revisar"><b>${found.length} ejercicio(s) con "Espalda" por revisar.</b> Ahora se separa en Dorsales, Espalda media, Trapecios y Lumbar. Tocá uno para ir a él:
+      <div class="chips" style="margin-top:8px">${found.map((f) =>
+        `<button class="chip" data-act="go-ex" data-day="${esc(f.d.id)}" data-id="${esc(f.x.id)}">${esc(f.d.name)} · ${esc(f.x.name)}</button>`).join('')}</div>
       ${fix ? `<button class="block" style="margin-top:8px" data-act="muscle-back-all">Usar la sugerencia en ${fix}</button>` : ''}</div>`;
   }
 
@@ -1163,7 +1165,8 @@
         <span><b data-sum="name">${esc(e.name)}</b>
           <span class="muted" data-sum="info">${esc(exInfo(e))}</span>
           ${inSuperset ? '<span class="badge">Superserie</span>' : ''}
-          ${rev ? '<span class="badge warn">REVISAR</span>' : ''}</span>
+          ${rev ? '<span class="badge warn">REVISAR</span>' : ''}
+          ${S.hasLegacyMuscle(e) ? '<span class="badge warn">ESPALDA</span>' : ''}</span>
       </summary>
       <div class="body">
         <label>Nombre</label>
@@ -1765,6 +1768,12 @@
         const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
         const rep = S.backReplacement(ex);
         if (rep) { S.backup('músculos'); ex.muscles = rep; S.commit(); ui.open.add(id); toast('Músculos actualizados ✓'); render(); }
+        break;
+      }
+      case 'go-ex': {                                // desde el aviso: abre el ejercicio y baja hasta él
+        ui.open.add(btn.dataset.id); ui.mopen.add(btn.dataset.id); render();
+        const box = document.querySelector(`details.exe[data-id="${CSS.escape(btn.dataset.id)}"]`);
+        if (box) setTimeout(() => box.scrollIntoView({ block: 'start' }), 0);
         break;
       }
       case 'muscle-back-all': {
