@@ -1041,6 +1041,18 @@
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* nada */ }
   }
 
+  /* Opciones de visualización de ESTE dispositivo (no se sincronizan ni tocan los datos):
+     esconder algo nunca borra lo guardado. Cada opción trae su valor de fábrica. */
+  const OPTION_DEFAULTS = { rir: true, help: true };
+  function opt(k) { const v = getPref('opt.' + k); return v === undefined ? !!OPTION_DEFAULTS[k] : !!v; }
+  function setOpt(k, on) { if (k in OPTION_DEFAULTS) setPref('opt.' + k, !!on); }
+  /** Vuelve a mostrar las ayudas ⓘ que ya se leyeron. */
+  function resetHelp() {
+    const p = readPrefs();
+    Object.keys(p).filter((k) => k.indexOf('help.') === 0).forEach((k) => { delete p[k]; });
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* nada */ }
+  }
+
   /* Recordatorio de backup: cuántas sesiones terminadas había al último "Exportar backup". */
   const EXPORT_KEY = 'gymapp.lastExport';
   const finishedCount = () => state.sessions.filter((s) => s.finished).length;
@@ -1193,7 +1205,7 @@
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession,
     exerciseNames, progress,
-    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref,
+    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
     parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */

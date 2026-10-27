@@ -40,10 +40,14 @@
   /* Ayudas: se ven abiertas hasta tocar "Entendido" (se recuerda en este dispositivo); después
      queda un ⓘ junto al título que las vuelve a abrir. Los avisos (sesión de ayer, backup) no van acá. */
   const helpSeen = (id) => !!S.getPref('help.' + id);
-  const helpBox = (id, html) => (!helpSeen(id) || ui.helpOpen.has(id) ? `
+  const helpBox = (id, html) => (S.opt('help') && (!helpSeen(id) || ui.helpOpen.has(id)) ? `
     <div class="help-box"><div>${html}</div><button class="help-ok" data-act="help-ok" data-help="${id}">Entendido</button></div>` : '');
-  const helpBtn = (id) => (helpSeen(id) && !ui.helpOpen.has(id)
+  const helpBtn = (id) => (S.opt('help') && helpSeen(id) && !ui.helpOpen.has(id)
     ? `<button class="info" data-act="help-show" data-help="${id}" aria-label="Ver ayuda">i</button>` : '');
+
+  /** Casillero de RIR de una serie (opcional; se esconde desde Datos → Opciones, sin borrar lo guardado). */
+  const rirInput = (st) => (S.opt('rir')
+    ? `<input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">` : '');
 
   /** Vibración muy corta al completar algo (Android; en iPhone no existe y se ignora). */
   const haptic = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* nada */ } };
@@ -200,7 +204,7 @@
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
         ${ex.drop ? helpBox('drop', '↳ <b>Drop set:</b> cada serie tiene una segunda parte sin descanso, con menos peso.') : ''}
-        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps · RIR</span><span></span><span></span></div>
+        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>${S.opt('rir') ? 'reps · RIR' : 'reps'}</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
@@ -229,7 +233,7 @@
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
               ${totCaption(st, s.exercises[i], false)}
-              <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
+              ${rirInput(st)}
             </div>
           </div>`;
       }).join('');
@@ -286,7 +290,7 @@
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
-      ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓. <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.')}
+      ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.' + (S.opt('rir') ? ' <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.' : ''))}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
         <button class="primary block" data-act="finish">${editing || s.finished ? 'Guardar cambios' : 'Finalizar sesión'}</button>
@@ -419,7 +423,7 @@
         <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
         <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
         ${totCaption(st, ex, false)}
-        <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
+        ${rirInput(st)}
       </div>${drop}
     </div>`;
   }
@@ -695,12 +699,12 @@
         <div class="stats">
           <div class="stat"><b>${w.sessions}</b><span>Sesiones</span></div>
           <div class="stat"><b>${w.sets}</b><span>Series hechas</span></div>
-          <div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
-          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>
+          ${S.opt('rir') ? `<div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
+          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>` : ''}
           <div class="stat"><b>${w.minutesAvg != null ? w.minutesAvg + ' min' : '–'}</b><span>Duración promedio</span></div>
           <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen: peso × reps (${unit()})</span></div>
         </div>
-        ${w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
+        ${S.opt('rir') && w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
       </div>`;
   }
 
@@ -1125,11 +1129,27 @@
     return m[e.code] || ('No se pudo iniciar sesión: ' + (e.message || e.code || e));
   }
 
+  /** Opciones de qué ver. Son de ESTE dispositivo: no se sincronizan y esconder algo no borra nada. */
+  function optionsCard() {
+    const row = (k, title, hint) => `
+      <label class="opt"><span><b>${title}</b><small>${hint}</small></span>
+        <input type="checkbox" role="switch" data-opt="${k}" ${S.opt(k) ? 'checked' : ''}></label>`;
+    return `
+      <div class="card stack">
+        <h2>Opciones</h2>
+        <p class="muted">Elegí qué ver. Son de este dispositivo: en tu otro teléfono o compu se eligen aparte. Esconder algo no borra lo que ya cargaste.</p>
+        ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
+        ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
+        <button class="block" data-act="help-reset">Volver a mostrar las ayudas leídas</button>
+      </div>`;
+  }
+
   function viewData() {
     const n = S.state.sessions.filter((s) => s.finished).length;
     return `
-      <h1>Datos y backup</h1>
+      <h1>Datos y opciones</h1>
       ${accountCard()}
+      ${optionsCard()}
       <div class="card stack">
         <h2>Backup</h2>
         <p class="muted">${n} sesión(es) guardadas. ${window.Cloud && Cloud.user
@@ -1667,6 +1687,7 @@
       }
 
       /* --- datos --- */
+      case 'help-reset': S.resetHelp(); ui.helpOpen.clear(); toast(S.opt('help') ? 'Las ayudas vuelven a verse' : 'Listo. Para verlas, prendé "Ayudas y explicaciones"'); render(); break;
       case 'help-ok': S.setPref('help.' + btn.dataset.help, 1); ui.helpOpen.delete(btn.dataset.help); render(); break;
       case 'help-show': ui.helpOpen.add(btn.dataset.help); render(); break;
       case 'export-json':
@@ -1797,6 +1818,7 @@
   /* Al salir de un campo inválido, vuelve al último valor guardado. */
   $view.addEventListener('change', (e) => {
     const el = e.target;
+    if (el.dataset.opt) { S.setOpt(el.dataset.opt, el.checked); render(); return; }
     if (el.dataset.f === 'date') {
       const s = currentSession();
       if (s && el.value) { s.date = el.value; S.commit(); }
