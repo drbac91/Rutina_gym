@@ -478,3 +478,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .opt input[type="checkbox"]:checked::after { transform: translateX(20px); }
 .opt input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .opt input[type="checkbox"], .opt input[type="checkbox"]::after { transition: none; } }
+
+/* Historial: elegir días para compartir */
+.sharebar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin: 8px 0; background: var(--fill); border-radius: var(--radius-sm); }
+.sharebar span { flex: 1; }
+.card.picked { outline: 2px solid var(--accent, #0a84ff); }
+.ex-head:has(.pick) { align-items: center; }
+.ex-head:has(.pick) h3 { flex: 1; margin: 0; }
+.pick { display: flex; align-items: center; min-width: 32px; min-height: 44px; }
+.pick input { width: 22px; height: 22px; margin: 0; }

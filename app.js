@@ -12,6 +12,7 @@
     editId: null,        // id de una sesión ya terminada que se está editando
     open: new Set(),     // ejercicios del editor que están desplegados
     pasteOpen: false,    // caja para pegar el JSON de una rutina
+    sel: null,           // Historial: ids elegidos para compartir (null = modo normal)
     progKey: null,       // ejercicio elegido en Progreso
     progDay: null,       // día elegido en el gráfico de volumen por día
     progWeek: null,      // semana elegida en series por músculo
@@ -578,7 +579,13 @@
     const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
       <div class="note revisar">Hace <b>${since} entrenamientos</b> que no exportás un backup y tus datos están solo en este teléfono.
         <button class="block" style="margin-top:8px" data-act="export-json">⬇ Exportar backup ahora</button></div>` : '';
-    return '<h1>Historial</h1>' + remind + list.map((s) => {
+    const sel = ui.sel;
+    const bar = sel ? `
+      <div class="sharebar"><span><b>${sel.size}</b> elegido(s)</span>
+        <button class="primary" data-act="share-go" ${sel.size ? '' : 'disabled'}>Enviar</button>
+        <button data-act="share-cancel">Cancelar</button></div>`
+      : '<button class="block" data-act="share-start">Compartir días por WhatsApp…</button>';
+    return '<h1>Historial</h1>' + remind + bar + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
@@ -586,19 +593,45 @@
         return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}</div>` : '';
       }).join('');
       return `
-      <article class="card" data-sid="${esc(s.id)}">
+      <article class="card ${sel && sel.has(s.id) ? 'picked' : ''}" data-sid="${esc(s.id)}">
         <div class="ex-head">
+          ${sel ? `<label class="pick"><input type="checkbox" data-pick ${sel.has(s.id) ? 'checked' : ''} aria-label="Elegir esta sesión"></label>` : ''}
           <h3>${esc(s.dayName || 'Sesión')} ${s.finished ? '' : '<span class="badge warn">en curso</span>'}</h3>
           <span class="muted">${esc(fmtDate(s.date))}</span>
         </div>
         <p class="muted">Volumen: ${fmt(vol)} ${unit()}${S.sessionMinutes(s) != null ? ' · ' + S.sessionMinutes(s) + ' min' : ''}${s.bodyweight ? ' · peso corporal ' + fmt(s.bodyweight) + ' ' + unit() : ''}</p>
         ${exs}
-        <div class="row" style="margin-top:10px">
+        ${sel ? '' : `<div class="row" style="margin-top:10px">
           <button data-act="edit-session">${s.finished ? 'Editar' : 'Continuar'}</button>
           <button data-act="del-session" class="danger">Borrar</button>
-        </div>
+        </div>`}
       </article>`;
     }).join('');
+  }
+
+  /** Texto corto y legible de las sesiones elegidas (del día más viejo al más nuevo), para WhatsApp. */
+  function shareText(ids) {
+    const list = S.sessions().filter((x) => ids.has(x.id)).sort((a, b) => (a.date < b.date ? -1 : 1));
+    return list.map((s) => {
+      const min = S.sessionMinutes(s);
+      const head = `*${s.dayName || 'Sesión'}* · ${fmtDate(s.date)}${min != null ? ' · ' + min + ' min' : ''}`;
+      const lines = s.exercises.map((ex) => {
+        const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
+        return sets ? `• ${ex.name}: ${sets} ${unit()}` : '';
+      }).filter(Boolean);
+      return [head, ...lines].join('\n');
+    }).join('\n\n');
+  }
+
+  async function shareSessions() {
+    const text = shareText(ui.sel);
+    if (!text) return;
+    if (navigator.share) {
+      try { await navigator.share({ text }); ui.sel = null; render(); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; /* otro error: probar copiar */ }
+    }
+    try { await navigator.clipboard.writeText(text); toast('Texto copiado. Pegalo en WhatsApp.'); ui.sel = null; render(); }
+    catch (err) { toast('No se pudo compartir ni copiar en este navegador.'); }
   }
 
   /* ======================================================================
@@ -1301,7 +1334,7 @@
 
   function go(tab) {
     if (tab !== 'train') ui.editId = null;   // salir de Entrenar cierra la edición
-    ui.tab = tab;
+    ui.tab = tab; ui.sel = null;
     render();
     $view.classList.remove('enter'); void $view.offsetWidth; $view.classList.add('enter');
     window.scrollTo(0, 0);
@@ -1579,6 +1612,9 @@
       case 'back': ui.editId = null; go('history'); break;
 
       /* --- historial --- */
+      case 'share-start': ui.sel = new Set(); render(); break;
+      case 'share-cancel': ui.sel = null; render(); break;
+      case 'share-go': shareSessions(); break;
       case 'edit-session': {
         const sid = btn.closest('[data-sid]').dataset.sid;
         const s = S.find(S.state.sessions, sid);
@@ -1837,6 +1873,11 @@
   /* Al salir de un campo inválido, vuelve al último valor guardado. */
   $view.addEventListener('change', (e) => {
     const el = e.target;
+    if (el.matches && el.matches('input[data-pick]')) {
+      const id = el.closest('[data-sid]').dataset.sid;
+      el.checked ? ui.sel.add(id) : ui.sel.delete(id);
+      render(); return;
+    }
     if (el.dataset.opt) { S.setOpt(el.dataset.opt, el.checked); render(); return; }
     if (el.dataset.f === 'date') {
       const s = currentSession();
