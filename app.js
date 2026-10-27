@@ -12,6 +12,7 @@
     editId: null,        // id de una sesión ya terminada que se está editando
     open: new Set(),     // ejercicios del editor que están desplegados
     pasteOpen: false,    // caja para pegar el JSON de una rutina
+    sel: null,           // Historial: ids elegidos para compartir (null = modo normal)
     progKey: null,       // ejercicio elegido en Progreso
     progDay: null,       // día elegido en el gráfico de volumen por día
     progWeek: null,      // semana elegida en series por músculo
@@ -40,10 +41,14 @@
   /* Ayudas: se ven abiertas hasta tocar "Entendido" (se recuerda en este dispositivo); después
      queda un ⓘ junto al título que las vuelve a abrir. Los avisos (sesión de ayer, backup) no van acá. */
   const helpSeen = (id) => !!S.getPref('help.' + id);
-  const helpBox = (id, html) => (!helpSeen(id) || ui.helpOpen.has(id) ? `
+  const helpBox = (id, html) => (S.opt('help') && (!helpSeen(id) || ui.helpOpen.has(id)) ? `
     <div class="help-box"><div>${html}</div><button class="help-ok" data-act="help-ok" data-help="${id}">Entendido</button></div>` : '');
-  const helpBtn = (id) => (helpSeen(id) && !ui.helpOpen.has(id)
+  const helpBtn = (id) => (S.opt('help') && helpSeen(id) && !ui.helpOpen.has(id)
     ? `<button class="info" data-act="help-show" data-help="${id}" aria-label="Ver ayuda">i</button>` : '');
+
+  /** Casillero de RIR de una serie (opcional; se esconde desde Datos → Opciones, sin borrar lo guardado). */
+  const rirInput = (st) => (S.opt('rir')
+    ? `<input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">` : '');
 
   /** Vibración muy corta al completar algo (Android; en iPhone no existe y se ignora). */
   const haptic = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* nada */ } };
@@ -97,6 +102,29 @@
       document.addEventListener('keydown', key, true);
       document.body.appendChild(box);
     });
+  }
+
+  /** Recorrido de primer uso: pasos cortos, uno por ventana. Se puede salir en cualquier momento. */
+  const TOUR = [
+    ['1 de 5 · Entrenar', 'Elegí el día (la app te propone el que toca). Cargá peso y repeticiones de cada serie y tocá ✓. Arriba de cada ejercicio ves "Última vez" para saber qué superar.'],
+    ['2 de 5 · Terminar', 'Al final tocá "Terminar". Si quedaron series sin ✓, te pregunto qué hacer con ellas: nada se borra si vos no lo elegís.'],
+    ['3 de 5 · Historial y Progreso', 'En Historial ves tus sesiones y podés mandar varios días por WhatsApp. En Progreso hay gráficos, tu 1RM estimado y los ejercicios que se estancaron.'],
+    ['4 de 5 · Rutina', 'Cambiá ejercicios, series, repeticiones y notas. Con Enter pasás al campo siguiente. Cambiar la rutina no toca tu historial.'],
+    ['5 de 5 · Datos y Opciones', 'Tus datos viven en este dispositivo: exportá un backup de vez en cuando, o entrá con Google para sincronizarlos. En Opciones prendés o apagás RIR, RPE, 1RM y las ayudas.'],
+  ];
+  async function runTour() {
+    for (let i = 0; i < TOUR.length; i++) {
+      const last = i === TOUR.length - 1;
+      const v = await choose(TOUR[i][0], esc(TOUR[i][1]), [
+        { label: last ? 'Listo, empezar' : 'Siguiente', value: 'next', cls: 'primary' },
+        ...(i ? [{ label: 'Anterior', value: 'back' }] : []),
+        ...(last ? [] : [{ label: 'Salir', value: 'exit' }]),
+      ]);
+      if (v === 'back') i -= 2;
+      else if (v !== 'next') break;
+    }
+    S.setPref('tour', 1);
+    if (ui.tab === 'train') render();
   }
 
   /** Descarga un archivo generado en el navegador. */
@@ -159,7 +187,11 @@
     // Debajo de cada día, cuándo se hizo por última vez (así se ve qué día quedó atrás).
     const when = (d) => (!trained ? '' : stats[d.id].last
       ? ` · ${agoText(stats[d.id].last.date)}` : ' · <span class="warn-txt">nunca</span>');
-    return `<h1>¿Qué día entrenás?</h1>${exampleNote()}` + days.map((d) => `
+    const tourCard = !trained && !S.getPref('tour') ? `
+      <div class="note"><b>¿Primera vez?</b> Hay un recorrido de 1 minuto.
+        <div class="row" style="margin-top:8px"><button class="primary" data-act="tour">Ver recorrido</button>
+        <button data-act="tour-skip">Ahora no</button></div></div>` : '';
+    return `<h1>¿Qué día entrenás?</h1>${tourCard}${exampleNote()}` + days.map((d) => `
       <button class="day-btn block ${d.id === next ? 'primary' : ''}" style="margin-bottom:10px" data-act="start" data-day="${esc(d.id)}">
         <span>${esc(d.name)}<small>${d.exercises.length} ejercicios${when(d)}</small></span>
         <span>${d.id === next ? 'Sugerido hoy ▸' : '▸'}</span>
@@ -178,12 +210,21 @@
     ? `<div class="note"><b>Esta es una rutina de ejemplo.</b> Cambiala en la pestaña Rutina o cargá la tuya en Datos → Importar rutina. Tocá un día para empezar a anotar.</div>`
     : '');
 
+  /** RIR de la vez anterior, solo si se cargó y las opciones lo permiten. Igual en todas: "RIR 2 en todas". */
+  function prevRir(sets) {
+    if (!S.opt('rir') || !S.opt('rirPrev') || !sets.some((st) => st.rir != null)) return null;
+    const all = sets.every((st) => st.rir != null && st.rir === sets[0].rir);
+    return all ? { all: sets[0].rir } : { each: sets.map((st) => (st.rir != null ? st.rir : null)) };
+  }
+
   /** Texto "Última vez (fecha · otro día): series" de un ejercicio. */
   function prevText(s, ex) {
     const last = S.lastEntry(ex.name, s.id, s.dayId);
     if (!last) return 'Sin registros previos';
     const otherDay = last.dayId !== s.dayId && last.dayName ? ' · ' + esc(last.dayName) : '';
-    return `Última vez (${fmtShort(last.date)}${otherDay}): ` + last.sets.map(fmtSet).join(' · ');
+    const r = prevRir(last.sets);
+    const body = last.sets.map((st, i) => fmtSet(st) + (r && r.each && r.each[i] != null ? ` (RIR ${r.each[i]})` : '')).join(' · ');
+    return `Última vez (${fmtShort(last.date)}${otherDay}): ` + body + (r && r.all != null ? ` · RIR ${r.all} en todas` : '');
   }
 
   const targetText = (ex) => {
@@ -200,15 +241,24 @@
         <p class="prev">${prevText(s, ex)}</p>
         ${barPicker(ex, i)}
         ${ex.drop ? helpBox('drop', '↳ <b>Drop set:</b> cada serie tiene una segunda parte sin descanso, con menos peso.') : ''}
-        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>reps · RIR</span><span></span><span></span></div>
+        <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>${S.opt('rir') ? 'reps · RIR' : 'reps'}</span><span></span><span></span></div>
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
           <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
+        ${rpeRow(ex)}
         ${commentBox(ex)}
       </section>`;
+  }
+
+  /** Esfuerzo del ejercicio (RPE 1-10). Solo si la opción está prendida. */
+  function rpeRow(ex) {
+    if (!S.opt('rpe')) return '';
+    const vals = []; for (let v = 5; v <= 10; v += 0.5) vals.push(v);
+    return `<div class="rpe-row"><label>${esc(ex.name)} · RPE (qué tan duro fue, 10 = al límite)
+      <select data-f="rpe" aria-label="RPE de ${esc(ex.name)}"><option value="">–</option>${vals.map((v) => `<option value="${v}" ${ex.rpe === v ? 'selected' : ''}>${fmt(v)}</option>`).join('')}</select></label></div>`;
   }
 
   /** Tarjeta de superserie: 2+ ejercicios que se alternan. Cada serie lleva una línea por
@@ -229,7 +279,7 @@
               ${weightField(st, s.exercises[i], false, 'Peso de ' + esc(s.exercises[i].name))}
               <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones de ${esc(s.exercises[i].name)}">
               ${totCaption(st, s.exercises[i], false)}
-              <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
+              ${rirInput(st)}
             </div>
           </div>`;
       }).join('');
@@ -244,7 +294,7 @@
           </div>
         </div>`);
     }
-    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('');
+    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('') + idxs.map((i) => `<div data-ex="${i}">${rpeRow(s.exercises[i])}</div>`).join('');
     const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
     return `
       <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
@@ -286,7 +336,7 @@
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
-      ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓. <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.')}
+      ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.' + (S.opt('rir') ? ' <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.' : ''))}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
         <button class="primary block" data-act="finish">${editing || s.finished ? 'Guardar cambios' : 'Finalizar sesión'}</button>
@@ -419,7 +469,7 @@
         <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
         <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
         ${totCaption(st, ex, false)}
-        <input class="rir" inputmode="numeric" data-f="rir" value="${st.rir ?? ''}" placeholder="RIR" aria-label="Repeticiones en reserva (RIR)">
+        ${rirInput(st)}
       </div>${drop}
     </div>`;
   }
@@ -565,27 +615,62 @@
     const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
       <div class="note revisar">Hace <b>${since} entrenamientos</b> que no exportás un backup y tus datos están solo en este teléfono.
         <button class="block" style="margin-top:8px" data-act="export-json">⬇ Exportar backup ahora</button></div>` : '';
-    return '<h1>Historial</h1>' + remind + list.map((s) => {
+    const sel = ui.sel;
+    const bar = sel ? `
+      <div class="sharebar"><span><b>${sel.size}</b> elegido(s)</span>
+        <button class="primary" data-act="share-go" ${sel.size ? '' : 'disabled'}>Enviar</button>
+        <button data-act="share-cancel">Cancelar</button></div>`
+      : '<button class="block" data-act="share-start">Compartir días por WhatsApp…</button>';
+    return '<h1>Historial</h1>' + remind + bar + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
       const exs = s.exercises.map((ex) => {
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
-        return sets ? `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}</div>` : '';
+        if (!sets) return '';
+        const best = S.opt('e1rmHist') ? ex.sets.filter((x) => x.done).reduce((m, x) => Math.max(m, S.e1rm(x.weight, x.reps) || 0), 0) : 0;
+        const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
+        return `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">· ${extra}</span>` : ''}</div>`;
       }).join('');
       return `
-      <article class="card" data-sid="${esc(s.id)}">
+      <article class="card ${sel && sel.has(s.id) ? 'picked' : ''}" data-sid="${esc(s.id)}">
         <div class="ex-head">
+          ${sel ? `<label class="pick"><input type="checkbox" data-pick ${sel.has(s.id) ? 'checked' : ''} aria-label="Elegir esta sesión"></label>` : ''}
           <h3>${esc(s.dayName || 'Sesión')} ${s.finished ? '' : '<span class="badge warn">en curso</span>'}</h3>
           <span class="muted">${esc(fmtDate(s.date))}</span>
         </div>
         <p class="muted">Volumen: ${fmt(vol)} ${unit()}${S.sessionMinutes(s) != null ? ' · ' + S.sessionMinutes(s) + ' min' : ''}${s.bodyweight ? ' · peso corporal ' + fmt(s.bodyweight) + ' ' + unit() : ''}</p>
         ${exs}
-        <div class="row" style="margin-top:10px">
+        ${sel ? '' : `<div class="row" style="margin-top:10px">
           <button data-act="edit-session">${s.finished ? 'Editar' : 'Continuar'}</button>
           <button data-act="del-session" class="danger">Borrar</button>
-        </div>
+        </div>`}
       </article>`;
     }).join('');
+  }
+
+  /** Texto corto y legible de las sesiones elegidas (del día más viejo al más nuevo), para WhatsApp. */
+  function shareText(ids) {
+    const list = S.sessions().filter((x) => ids.has(x.id)).sort((a, b) => (a.date < b.date ? -1 : 1));
+    return list.map((s) => {
+      const min = S.sessionMinutes(s);
+      const head = `*${s.dayName || 'Sesión'}* · ${fmtDate(s.date)}${min != null ? ' · ' + min + ' min' : ''}`;
+      const lines = s.exercises.map((ex) => {
+        const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
+        return sets ? `• ${ex.name}: ${sets} ${unit()}` : '';
+      }).filter(Boolean);
+      return [head, ...lines].join('\n');
+    }).join('\n\n');
+  }
+
+  async function shareSessions() {
+    const text = shareText(ui.sel);
+    if (!text) return;
+    if (navigator.share) {
+      try { await navigator.share({ text }); ui.sel = null; render(); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; /* otro error: probar copiar */ }
+    }
+    try { await navigator.clipboard.writeText(text); toast('Texto copiado. Pegalo en WhatsApp.'); ui.sel = null; render(); }
+    catch (err) { toast('No se pudo compartir ni copiar en este navegador.'); }
   }
 
   /* ======================================================================
@@ -695,12 +780,12 @@
         <div class="stats">
           <div class="stat"><b>${w.sessions}</b><span>Sesiones</span></div>
           <div class="stat"><b>${w.sets}</b><span>Series hechas</span></div>
-          <div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
-          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>
+          ${S.opt('rir') ? `<div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
+          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>` : ''}
           <div class="stat"><b>${w.minutesAvg != null ? w.minutesAvg + ' min' : '–'}</b><span>Duración promedio</span></div>
           <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen: peso × reps (${unit()})</span></div>
         </div>
-        ${w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
+        ${S.opt('rir') && w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
       </div>`;
   }
 
@@ -1014,6 +1099,10 @@
         return d.exercises.map((e, ei) => exerciseEditor(e, ei, d.exercises.length, inSS.has(ei),
           ei < d.exercises.length - 1 && !!e.group && d.exercises[ei + 1].group === e.group)).join('');
       })()}
+      <div class="row" style="margin-top:8px">
+        <button data-act="open-all">Desplegar todos</button>
+        <button data-act="close-all">Plegar todos</button>
+      </div>
       <button class="block" style="margin-top:8px" data-act="add-ex">+ Agregar ejercicio</button>
     </section>`;
   }
@@ -1034,11 +1123,11 @@
       </summary>
       <div class="body">
         <label>Nombre</label>
-        <input data-rf="name" list="ex-names" autocomplete="off" value="${esc(e.name)}">
+        <input data-rf="name" enterkeyhint="next" list="ex-names" autocomplete="off" value="${esc(e.name)}">
         <div class="grid3">
-          <div><label>Series</label><input data-rf="sets" inputmode="numeric" value="${e.sets}"></div>
-          <div><label>Reps (texto)</label><input data-rf="reps" value="${esc(e.reps)}" placeholder="10-10"></div>
-          <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
+          <div><label>Series</label><input data-rf="sets" enterkeyhint="next" inputmode="numeric" value="${e.sets}"></div>
+          <div><label>Reps (texto)</label><input data-rf="reps" enterkeyhint="next" value="${esc(e.reps)}" placeholder="10-10"></div>
+          <div><label>Peso obj. (${unit()})</label><input data-rf="targetWeight" enterkeyhint="next" inputmode="decimal" value="${fmt(e.targetWeight)}" placeholder="–"></div>
         </div>
         <label>¿Cómo se carga el peso? (con barra: discos por lado · con bloques: cantidad × ${fmt(S.BRICK_KG)} kg)</label>
         <div class="chips">
@@ -1125,11 +1214,31 @@
     return m[e.code] || ('No se pudo iniciar sesión: ' + (e.message || e.code || e));
   }
 
+  /** Opciones de qué ver. Son de ESTE dispositivo: no se sincronizan y esconder algo no borra nada. */
+  function optionsCard() {
+    const row = (k, title, hint) => `
+      <label class="opt"><span><b>${title}</b><small>${hint}</small></span>
+        <input type="checkbox" role="switch" data-opt="${k}" ${S.opt(k) ? 'checked' : ''}></label>`;
+    return `
+      <div class="card stack">
+        <h2>Opciones</h2>
+        <p class="muted">Elegí qué ver. Son de este dispositivo: en tu otro teléfono o compu se eligen aparte. Esconder algo no borra lo que ya cargaste.</p>
+        ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
+        ${row('rirPrev', 'RIR de la vez anterior', 'Junto a "Última vez", muestra el RIR que anotaste. Solo se ve si el RIR está prendido.')}
+        ${row('rpe', 'RPE por ejercicio', 'Un casillero por ejercicio para anotar qué tan duro fue (1 a 10). También se ve en el Historial.')}
+        ${row('e1rmHist', '1RM estimado en el Historial', 'Una cifra chica por ejercicio: el 1RM de tu mejor serie de hasta 10 repeticiones.')}
+        ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
+        <button class="block" data-act="tour">Ver el recorrido de primer uso</button>
+        <button class="block" data-act="help-reset">Volver a mostrar las ayudas leídas</button>
+      </div>`;
+  }
+
   function viewData() {
     const n = S.state.sessions.filter((s) => s.finished).length;
     return `
-      <h1>Datos y backup</h1>
+      <h1>Datos y opciones</h1>
       ${accountCard()}
+      ${optionsCard()}
       <div class="card stack">
         <h2>Backup</h2>
         <p class="muted">${n} sesión(es) guardadas. ${window.Cloud && Cloud.user
@@ -1267,7 +1376,7 @@
 
   function go(tab) {
     if (tab !== 'train') ui.editId = null;   // salir de Entrenar cierra la edición
-    ui.tab = tab;
+    ui.tab = tab; ui.sel = null;
     render();
     $view.classList.remove('enter'); void $view.offsetWidth; $view.classList.add('enter');
     window.scrollTo(0, 0);
@@ -1545,6 +1654,9 @@
       case 'back': ui.editId = null; go('history'); break;
 
       /* --- historial --- */
+      case 'share-start': ui.sel = new Set(); render(); break;
+      case 'share-cancel': ui.sel = null; render(); break;
+      case 'share-go': shareSessions(); break;
       case 'edit-session': {
         const sid = btn.closest('[data-sid]').dataset.sid;
         const s = S.find(S.state.sessions, sid);
@@ -1607,6 +1719,11 @@
         ui.open.add(id); render();
         break;
       }
+      case 'open-all': case 'close-all': {
+        const day = S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day);
+        day.exercises.forEach((x) => (act === 'open-all' ? ui.open.add(x.id) : ui.open.delete(x.id)));
+        render(); break;
+      }
       case 'add-ex': {
         const ex = S.addExercise(btn.closest('[data-day]').dataset.day);
         ui.open.add(ex.id); render();
@@ -1667,6 +1784,9 @@
       }
 
       /* --- datos --- */
+      case 'help-reset': S.resetHelp(); ui.helpOpen.clear(); toast(S.opt('help') ? 'Las ayudas vuelven a verse' : 'Listo. Para verlas, prendé "Ayudas y explicaciones"'); render(); break;
+      case 'tour': runTour(); break;
+      case 'tour-skip': S.setPref('tour', 1); render(); break;
       case 'help-ok': S.setPref('help.' + btn.dataset.help, 1); ui.helpOpen.delete(btn.dataset.help); render(); break;
       case 'help-show': ui.helpOpen.add(btn.dataset.help); render(); break;
       case 'export-json':
@@ -1797,6 +1917,17 @@
   /* Al salir de un campo inválido, vuelve al último valor guardado. */
   $view.addEventListener('change', (e) => {
     const el = e.target;
+    if (el.matches && el.matches('input[data-pick]')) {
+      const id = el.closest('[data-sid]').dataset.sid;
+      el.checked ? ui.sel.add(id) : ui.sel.delete(id);
+      render(); return;
+    }
+    if (el.dataset.f === 'rpe') {
+      const { ex } = ctx(el);
+      if (ex) S.setExRpe(ex, el.value === '' ? null : Number(el.value));
+      return;
+    }
+    if (el.dataset.opt) { S.setOpt(el.dataset.opt, el.checked); render(); return; }
     if (el.dataset.f === 'date') {
       const s = currentSession();
       if (s && el.value) { s.date = el.value; S.commit(); }
@@ -1852,10 +1983,20 @@
      (El teclado numérico ya se abre solo por inputmode="decimal"/"numeric".) */
   $view.addEventListener('focusin', (e) => {
     const el = e.target;
-    if (el.matches && el.matches('.setw input[data-f]')) {
+    if (el.matches && el.matches('.setw input[data-f], input[data-rf]')) {
       el.dataset.justFocused = '1';
       setTimeout(() => { try { el.select(); el.setSelectionRange(0, 99); } catch (err) { /* nada */ } }, 0);
     }
+  });
+  /* En el editor de Rutina, Enter pasa al campo siguiente (nombre → series → reps → peso → notas). */
+  $view.addEventListener('keydown', (e) => {
+    const el = e.target;
+    if (e.key !== 'Enter' || !el.matches || !el.matches('input[data-rf]')) return;
+    const fields = [...el.closest('details.exe').querySelectorAll('[data-rf]')];
+    const next = fields[fields.indexOf(el) + 1];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
   });
   /* El "soltar" del mismo toque que dio el foco movía el cursor y deshacía la selección
      (lo nuevo se mezclaba con lo viejo: "10" → "18.50"). */
