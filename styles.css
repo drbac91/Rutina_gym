@@ -493,3 +493,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .rpe-row label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .875rem; color: var(--muted); }
 .rpe-row select { min-width: 72px; }
 .hist-extra { white-space: nowrap; }
+
+/* línea de músculos del editor de Rutina */
+.mline { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 8px 14px; border-radius: 12px; background: var(--card); text-align: left; margin-bottom: 8px; }
+.mline .mtxt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mline.empty .mtxt { color: var(--muted); }
+.mline .mchg { color: var(--accent); font-size: .875rem; flex: none; }
