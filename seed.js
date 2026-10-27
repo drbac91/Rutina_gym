@@ -365,7 +365,7 @@ window.EXAMPLE_DATA = {
             "notes": "",
             "muscles": {
               "primary": [
-                "Espalda"
+                "Dorsales"
               ],
               "secondary": [
                 "Bíceps"
@@ -380,7 +380,7 @@ window.EXAMPLE_DATA = {
             "notes": "Una mano apoyada en el banco, espalda recta.",
             "muscles": {
               "primary": [
-                "Espalda"
+                "Espalda media"
               ],
               "secondary": [
                 "Bíceps"
@@ -395,7 +395,7 @@ window.EXAMPLE_DATA = {
             "notes": "",
             "muscles": {
               "primary": [
-                "Espalda"
+                "Espalda media"
               ],
               "secondary": []
             }

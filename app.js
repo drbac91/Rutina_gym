@@ -16,6 +16,7 @@
     progKey: null,       // ejercicio elegido en Progreso
     progDay: null,       // día elegido en el gráfico de volumen por día
     progWeek: null,      // semana elegida en series por músculo
+    mopen: new Set(),    // ejercicios del editor con los botones de músculos abiertos
     helpOpen: new Set(), // ayudas ya leídas que se volvieron a abrir con ⓘ
     chart: null,
   };
@@ -799,7 +800,7 @@
     const { list, unassigned } = S.muscleSets(ui.progWeek);
     const max = Math.max(1, ...list.map((x) => x.sets));
     const rows = list.map((x) => `
-        <div class="mrow ${x.sets ? '' : 'zero'}"><span class="mname">${esc(x.muscle)}</span>
+        <div class="mrow ${x.sets ? '' : 'zero'}"><span class="mname">${esc(x.muscle)}${S.LEGACY_MUSCLES.includes(x.muscle) ? ' (por revisar)' : ''}</span>
           <span class="mbar"><i style="width:${Math.round((x.sets / max) * 100)}%"></i></span>
           <b>${fmt(x.sets)}</b></div>`).join('');
     return `
@@ -1075,8 +1076,18 @@
       <p class="muted">Cambiar la rutina no modifica tu historial. El historial se une por nombre de ejercicio: si renombrás uno, el historial viejo queda con el nombre anterior (si te pasa, unilos en Progreso con "Unir…").</p>
       ${nameList()}
       ${pending ? `<div class="note revisar"><b>${pending} nota(s) para revisar.</b> Buscá las marcadas en amarillo.</div>` : ''}
+      ${backBanner()}
       ${days.map((d, di) => dayCard(d, di, days.length)).join('')}
       <button class="block primary" data-act="add-day">+ Agregar día</button>`;
+  }
+
+  /** Aviso de arriba: ejercicios que todavía dicen "Espalda" (lista vieja de músculos). */
+  function backBanner() {
+    const all = S.state.routine.days.flatMap((d) => d.exercises).filter((x) => S.hasLegacyMuscle(x));
+    if (!all.length) return '';
+    const fix = all.filter((x) => S.backReplacement(x)).length;
+    return `<div class="note revisar"><b>${all.length} ejercicio(s) con "Espalda" por revisar.</b> Ahora se separa en Dorsales, Espalda media, Trapecios y Lumbar.
+      ${fix ? `<button class="block" style="margin-top:8px" data-act="muscle-back-all">Usar la sugerencia en ${fix}</button>` : ''}</div>`;
   }
 
   /** Nombres que ya existen (historial y rutina), para que al escribir un ejercicio se sugiera el mismo nombre. */
@@ -1112,6 +1123,37 @@
   /** Resumen de un ejercicio en el editor: "4×5 · 60 kg · barra 20". */
   const exInfo = (e) => `${e.sets}×${e.reps}${e.targetWeight != null ? ' · ' + fmt(e.targetWeight) + ' ' + unit() : ''}${e.usesBar ? ' · con barra' : e.usesBricks ? ' · con bloques' : ''}`;
 
+  /** "Pecho · Hombros, Tríceps": principales, un punto, secundarios. */
+  const muscleText = (e) => {
+    const m = e.muscles;
+    if (!m) return 'Sin músculos · tocá para elegir';
+    return [m.primary.join(', '), m.secondary.join(', ')].filter(Boolean).join(' · ');
+  };
+
+  /** Línea de músculos de un ejercicio (se toca para abrir los botones) y, si hace falta, el aviso de "Espalda". */
+  function muscleBox(e) {
+    const open = ui.mopen.has(e.id);
+    let rev = '';
+    if (S.hasLegacyMuscle(e)) {
+      const rep = S.backReplacement(e);
+      rev = `<div class="note revisar"><b>"Espalda" se separó en Dorsales, Espalda media, Trapecios y Lumbar.</b>
+        ${rep ? `Sugerencia: ${esc([rep.primary.join(', '), rep.secondary.join(', ')].filter(Boolean).join(' · '))}
+        <button class="block" style="margin-top:8px" data-act="muscle-back">Usar la sugerencia</button>` : 'Elegí cuáles corresponden.'}</div>`;
+    }
+    return `
+        <label>Músculos</label>
+        <button class="mline ${e.muscles ? '' : 'empty'}" data-act="muscle-toggle" aria-expanded="${open}">
+          <span class="mtxt">${esc(muscleText(e))}</span><span class="mchg">${open ? 'Cerrar' : 'Cambiar'}</span></button>
+        ${rev}
+        ${open ? `<p class="muted">1 toque = principal · 2 = secundario (cuenta ${fmt(S.SECONDARY_MUSCLE_FACTOR)}) · 3 = quitar</p>
+        <div class="chips">
+          ${[...S.MUSCLES, ...S.LEGACY_MUSCLES.filter((m) => e.muscles && (e.muscles.primary.includes(m) || e.muscles.secondary.includes(m)))].map((m) => {
+            const k = e.muscles && e.muscles.primary.includes(m) ? 'p' : e.muscles && e.muscles.secondary.includes(m) ? 's' : '';
+            return `<button class="chip ${k === 'p' ? 'on' : k === 's' ? 'sec' : ''}" data-act="muscle" data-m="${esc(m)}">${esc(m)}${k === 's' ? ' · ½' : ''}</button>`;
+          }).join('')}
+        </div>` : ''}`;
+  }
+
   function exerciseEditor(e, ei, n, inSuperset, linkedNext) {
     const rev = isRevisar(e.notes);
     return `
@@ -1137,13 +1179,7 @@
           <button class="chip ${e.usesBar ? 'on' : ''}" data-act="set-load" data-v="bar">Con barra</button>
           <button class="chip ${e.usesBricks ? 'on' : ''}" data-act="set-load" data-v="bricks">Máquina con bloques</button>
         </div>
-        <label>Músculos: 1 toque = principal · 2 = secundario (cuenta ${fmt(S.SECONDARY_MUSCLE_FACTOR)}) · 3 = quitar</label>
-        <div class="chips">
-          ${S.MUSCLES.map((m) => {
-            const k = e.muscles && e.muscles.primary.includes(m) ? 'p' : e.muscles && e.muscles.secondary.includes(m) ? 's' : '';
-            return `<button class="chip ${k === 'p' ? 'on' : k === 's' ? 'sec' : ''}" data-act="muscle" data-m="${esc(m)}">${esc(m)}${k === 's' ? ' · ½' : ''}</button>`;
-          }).join('')}
-        </div>
+        <div data-mbox>${muscleBox(e)}</div>
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
         ${e.original ? `<div class="original">Original del PDF: ${esc(e.original)}</div>` : ''}
@@ -1276,7 +1312,7 @@
   const BACKUP_WHY = {
     import: 'antes de restaurar un backup', 'reset-routine': 'antes de volver a la rutina de ejemplo',
     cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
-    'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio',
+    'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio', músculos: 'antes de revisar "Espalda" en la rutina',
   };
   /** "copia del 20 oct, 21:40" (las copias de versiones viejas no tienen fecha). */
   const copyName = (at) => (at ? 'copia del ' + new Date(at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'copia anterior');
@@ -1714,7 +1750,30 @@
         const next = S.normMuscles({ primary: p, secondary: sec });
         delete ex.muscles;
         if (next) ex.muscles = next;                 // se guarda solo si hay alguno
-        S.commit(); ui.open.add(id); render();
+        S.commit(); ui.open.add(id); ui.mopen.add(id); render();
+        break;
+      }
+      case 'muscle-toggle': {
+        const id = btn.closest('[data-id]').dataset.id;
+        if (ui.mopen.has(id)) ui.mopen.delete(id); else ui.mopen.add(id);
+        const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
+        btn.closest('[data-mbox]').innerHTML = muscleBox(ex);
+        break;
+      }
+      case 'muscle-back': {                          // reemplazar "Espalda" por la sugerencia de la base
+        const id = btn.closest('[data-id]').dataset.id;
+        const ex = S.find(S.find(S.state.routine.days, btn.closest('[data-day]').dataset.day).exercises, id);
+        const rep = S.backReplacement(ex);
+        if (rep) { S.backup('músculos'); ex.muscles = rep; S.commit(); ui.open.add(id); toast('Músculos actualizados ✓'); render(); }
+        break;
+      }
+      case 'muscle-back-all': {
+        const todo = S.state.routine.days.flatMap((d) => d.exercises).filter((x) => S.backReplacement(x));
+        if (!todo.length) break;
+        if (!confirm(`¿Reemplazar "Espalda" en ${todo.length} ejercicio(s) por la sugerencia de la base?\n\nSe guarda una copia automática antes. Lo demás que cargaste no se toca.`)) break;
+        S.backup('músculos');
+        todo.forEach((x) => { x.muscles = S.backReplacement(x); });
+        S.commit(); toast(`Listo: ${todo.length} ejercicio(s) actualizados ✓`); render();
         break;
       }
       case 'set-load': {
@@ -1980,6 +2039,18 @@
     if (el.dataset.rf === 'name' && !el.classList.contains('invalid')) {   // nombre repetido: comparten historial
       const id = el.closest('[data-id]').dataset.id, key = S.normName(el.value);
       const dup = S.state.routine.days.find((d) => d.exercises.some((x) => x.id !== id && S.normName(x.name) === key));
+      const day = S.find(S.state.routine.days, el.closest('[data-day]').dataset.day), ex = S.find(day.exercises, id), box = el.closest('[data-id]');
+      if (!ex.muscles) {                           // sin músculos: se propone lo de la base (nunca pisa lo cargado)
+        const sug = S.suggestMuscles(ex.name);
+        if (sug) {
+          ex.muscles = { primary: sug.primary, secondary: sug.secondary };
+          S.commit();
+          box.querySelector('[data-mbox]').innerHTML = muscleBox(ex);
+          if (!dup) toast('Músculos sugeridos: ' + muscleText(ex), { label: 'Quitar', fn: () => {
+            delete ex.muscles; S.commit(); box.querySelector('[data-mbox]').innerHTML = muscleBox(ex);
+          } });
+        }
+      }
       if (dup) toast(`Ya existe "${el.value.trim()}" en ${dup.name}: van a compartir historial y pesos`);
       return;
     }
