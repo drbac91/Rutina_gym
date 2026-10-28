@@ -295,7 +295,8 @@
           </div>
         </div>`);
     }
-    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('') + idxs.map((i) => `<div data-ex="${i}">${rpeRow(s.exercises[i])}</div>`).join('');
+    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('');
+    const rpes = idxs.map((i) => `<div data-ex="${i}">${rpeRow(s.exercises[i])}</div>`).join('');
     const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
     return `
       <section class="card ex superset ${allDone ? 'done' : ''}" data-ex="${idxs[0]}" data-group="${idxs.join(',')}">
@@ -309,6 +310,7 @@
           <button data-act="add-set">+ Serie</button>
           <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
+        ${rpes}
         ${exs.map((e) => commentBox(e, true)).join('')}
       </section>`;
   }
