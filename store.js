@@ -292,11 +292,18 @@
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch (err) {
-      // Sin lugar: lo actual vale más que las copias automáticas; se sacan y se reintenta.
+      // Sin lugar: lo actual vale más que las copias automáticas. Primero se deja solo la más nueva;
+      // si tampoco alcanza, se sacan todas. Se reintenta en cada paso.
       try {
-        if (!localStorage.getItem(BACKUP_KEY)) throw err;
-        localStorage.removeItem(BACKUP_KEY);
-        localStorage.setItem(KEY, JSON.stringify(state));
+        const list = readBackups();
+        if (!list.length) throw err;
+        try {
+          localStorage.setItem(BACKUP_KEY, JSON.stringify(list.slice(0, 1)));
+          localStorage.setItem(KEY, JSON.stringify(state));
+        } catch (err1) {
+          localStorage.removeItem(BACKUP_KEY);
+          localStorage.setItem(KEY, JSON.stringify(state));
+        }
       } catch (err2) {
         ok = false;
         if (Store.onSaveError) Store.onSaveError(err2);
@@ -1160,6 +1167,31 @@
     commit(true);
   }
 
+  /** Suma lo que la nube tiene y acá falta (peso corporal por fecha, comentarios por ejercicio).
+   *  Lo local manda si hay un mismo dato en los dos. Así una edición de rutina hecha en un
+   *  dispositivo desactualizado no pisa lo cargado en otro. Devuelve true si agregó algo. */
+  function mergeRemoteExtras(bodyweights, comments) {
+    let added = false;
+    if (Array.isArray(bodyweights)) {
+      const have = new Set((state.bodyweights || []).map((x) => x.date));
+      const extra = normBodyweights(bodyweights).filter((x) => !have.has(x.date));
+      if (extra.length) { state.bodyweights = normBodyweights([...(state.bodyweights || []), ...extra]); added = true; }
+    }
+    if (comments && typeof comments === 'object') {
+      const cur = state.exerciseComments || {};
+      const extra = normComments(comments);
+      const miss = Object.keys(extra).filter((k) => !(k in cur));
+      if (miss.length) {
+        const next = Object.assign({}, cur);
+        miss.forEach((k) => { next[k] = extra[k]; });
+        state.exerciseComments = normComments(next);
+        added = true;
+      }
+    }
+    if (added) commit(true);
+    return added;
+  }
+
   /** Agrega o reemplaza una sesión que vino de la nube. */
   function upsertSession(raw) {
     const s = normSession(raw);
@@ -1264,7 +1296,7 @@
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
-    bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
+    mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession, reinsertSession,
