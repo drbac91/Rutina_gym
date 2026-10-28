@@ -320,7 +320,10 @@
       const id = ch.doc.id;
       if (ch.type === 'removed') {
         remoteIds.delete(id);
-        if (reconciled && S.removeSession(id)) { delete pushed['s:' + id]; changed = true; }
+        const local = S.find(S.state.sessions, id);
+        if (reconciled && local && pushed['s:' + id] !== sessionHash(local)) {
+          schedulePush();                                // edición local sin subir: gana sobre el borrado, se vuelve a subir
+        } else if (reconciled && S.removeSession(id)) { delete pushed['s:' + id]; changed = true; }
       } else {
         remoteIds.add(id);
         if (applyRemoteSession(id, ch.doc.data())) changed = true;
@@ -388,7 +391,12 @@
       take = Cloud.confirm('En la nube ya hay una rutina guardada y en este dispositivo hay otra distinta.\n\nAceptar = usar la de la nube\nCancelar = quedarse con la de este dispositivo y subirla');
       if (take) S.backup('nube');
     }
-    if (!take) return false;
+    if (!take) {
+      // Gana lo local, pero se suma lo que la nube tiene y acá falta (peso corporal, comentarios),
+      // para que subir esta rutina no lo pise. Se vuelve a subir con la unión.
+      if (dirty && S.mergeRemoteExtras(data.bodyweights, data.exerciseComments)) schedulePush();
+      return false;
+    }
     S.setRoutine(data.routine, data.weightUnit, data.updatedAt, data.exerciseComments, data.bodyweights, data.exerciseAliases);   // sin el campo, se conservan los locales
     pushed.routine = routineHash();
     savePushed();
@@ -483,7 +491,8 @@
       refreshStatus();
     }, (err) => {
       console.error('Error al subir:', err);
-      ops.forEach((o) => { if (!o.del) delete pushed[o.key]; });   // se reintenta en el próximo cambio
+      // Se reintenta en el próximo cambio. Un borrado fallido queda marcado en `pushed` para volver a pedirlo.
+      ops.forEach((o) => { if (o.del) pushed[o.key] = 'del'; else delete pushed[o.key]; });
       savePushed();
       hasPending = false; hadError = true;
       Cloud.lastError = err.code === 'permission-denied'
