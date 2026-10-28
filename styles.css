@@ -64,6 +64,7 @@ body {
   font: 1.0625rem/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
   padding-bottom: calc(84px + env(safe-area-inset-bottom));
 }
 main { max-width: 640px; margin: 0 auto; padding: 8px 16px 16px; padding-top: calc(8px + env(safe-area-inset-top)); }
@@ -357,6 +358,7 @@ button.info { position: relative; }
 .ssset .n { color: var(--muted); text-align: center; font-size: .9375rem; font-variant-numeric: tabular-nums; }
 .sslines { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .ssname { display: block; font-size: .8125rem; color: var(--muted); margin: 0 0 3px 2px; letter-spacing: .005em; }
+.ssinputs > * { min-width: 0; }
 .ssinputs { display: grid; grid-template-columns: minmax(0, 1fr) 54px; gap: 5px; align-items: center; }
 .ssset input, .ssset .stepper button { min-height: 46px; }
 .ssset input { font-size: 1.1rem; }
@@ -365,12 +367,12 @@ button.info { position: relative; }
 .ssset .stepper input { text-align: center; padding: 8px 2px; min-width: 0; margin: 0 3px; font-variant-numeric: tabular-nums; font-weight: 600; }
 .ssset input.reps { text-align: center; padding: 8px 2px; font-variant-numeric: tabular-nums; font-weight: 600; }
 .ssset .chk {
-  padding: 0; min-width: 44px; width: 44px; border-radius: 50%; font-size: 1.1rem; color: var(--muted);
+  padding: 0; min-width: 44px; width: 44px; min-height: 44px; height: 44px; border-radius: 50%; font-size: 1.1rem; color: var(--muted);
   background: var(--fill); align-self: center;
 }
 .ssset.done .chk { background: var(--ok); color: #fff; }
 .ssset .chk.pop { animation: pop .32s var(--ease-out); }
-.ssset.done input { opacity: .6; }
+.ssset.done .sslines { opacity: .6; }
 .ssset .x { justify-self: end; padding: 0; min-width: 28px; width: 28px; background: none; color: var(--muted); font-size: 1.2rem; }
 .setw:has(.ssset) { padding-bottom: 10px; margin-bottom: 10px; border-bottom: .5px solid var(--sep); }
 .setw:has(.ssset):last-of-type { border-bottom: 0; margin-bottom: 0; }
