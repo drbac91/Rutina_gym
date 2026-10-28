@@ -1,0 +1,10 @@
+# Documentos internos: viven solo en la Mac (el repo es público)
+CLAUDE.md
+handoff.md
+security-audit.md
+sprint.md
+ux-*.md
+tests/
+tasks/
+graphify-out/
+.DS_Store
