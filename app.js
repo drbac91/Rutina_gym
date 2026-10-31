@@ -1292,7 +1292,9 @@
 
   /** Aviso si se entró con una cuenta de Google que no está habilitada (cloud.js cerró su sesión). */
   const deniedText = () => (window.Cloud && Cloud.deniedEmail
-    ? `${Cloud.deniedEmail} no está habilitada para guardar en la nube. Podés usar la app sin cuenta: tus datos quedan en este teléfono.`
+    ? Cloud.deniedReason === 'network'
+      ? 'No se pudo verificar tu cuenta. Revisá la conexión y probá de nuevo: tus datos siguen en este teléfono.'
+      : `${Cloud.deniedEmail} no está habilitada para guardar en la nube. Podés usar la app sin cuenta: tus datos quedan en este teléfono.`
     : '');
 
   /** Traduce errores de login a mensajes comprensibles. */

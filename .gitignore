@@ -9,6 +9,15 @@ tasks/
 graphify-out/
 .DS_Store
 
-# Reglas de Firestore: tienen emails personales; se publican desde la consola de Firebase
+# Reglas de Firestore: se publican desde la consola de Firebase
 firestore.rules
 firestore.rules.*
+
+# Datos exportados y notas
+rutina-gym-backup-*.json
+historial-gym-*.csv
+security-audit*.md
+notas*.md
+plan*.md
+.env*
+secrets*

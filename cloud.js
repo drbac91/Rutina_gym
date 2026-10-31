@@ -30,6 +30,7 @@
     user: null,             // { uid, email, name } si inició sesión
     status: 'off',          // off | syncing | synced | offline | error
     lastError: '',
+    deniedReason: '',                        // 'network': no se pudo verificar la cuenta
     skipped: false,
     deniedEmail: '',        // cuenta que entró pero no está habilitada en la nube (se cerró su sesión)
     onChange: null,         // la UI se entera de cambios de login/estado
@@ -225,10 +226,14 @@
     // Antes de tocar los datos de este dispositivo, se confirma que la cuenta esté habilitada en la
     // nube (firestore.rules). Si no lo está, se cierra su sesión y los datos locales quedan intactos.
     // Sin conexión no se puede saber: se sigue y, si después la nube la rechaza, onListenError la saca.
-    try { await routineRef().get(); } catch (e) {
+    let verified = false;
+    try { await routineRef().get(); verified = true; } catch (e) {
       if (e.code === 'permission-denied') { await deny(user); return; }
     }
+    // Sin verificar, solo sigue quien ya es dueño de estos datos: si no, nada local se toca.
+    if (!verified && store.get(OWNER_KEY) !== uid) { await deny(user, 'network'); return; }
     Cloud.deniedEmail = '';
+    Cloud.deniedReason = '';
     Cloud.user = { uid: user.uid, email: user.email || '', name: user.displayName || '' };
     Cloud.skipped = false;
     store.del(SKIP_KEY);
@@ -285,8 +290,9 @@
   }
 
   /** Cuenta no habilitada: se cierra su sesión sin tocar los datos locales y la app avisa. */
-  async function deny(user) {
+  async function deny(user, reason) {
     Cloud.deniedEmail = (user && user.email) || 'Esta cuenta';
+    Cloud.deniedReason = reason || '';
     stopSync();
     try { await auth.signOut(); } catch (e) { /* nada */ }
     notify();

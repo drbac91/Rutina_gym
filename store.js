@@ -57,6 +57,13 @@
   /* ---------- utilidades ---------- */
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const MAX_SETS = 50;                        // tope de series por ejercicio al normalizar
+  const isDateStr = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  /** El id de sesión es un documento de Firestore: sin "/" ni nombres reservados. Igual id, igual resultado. */
+  const safeDocId = (v) => {
+    const id = String(v == null ? '' : v).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
+    return id && !/^__.*__$/.test(id) ? id : uid();
+  };
 
   /** Nombre normalizado: sin tildes, minúsculas, espacios simples.
    *  Es la clave para que "Banco plano" de Día 1 y Día 3 compartan historial. */
@@ -70,7 +77,7 @@
   const exKey = (name) => {
     let k = normName(name);
     const al = (state && state.exerciseAliases) || {};
-    for (let i = 0; i < 10 && al[k]; i++) k = al[k];
+    for (let i = 0; i < 10 && Object.prototype.hasOwnProperty.call(al, k); i++) k = al[k];
     return k;
   };
 
@@ -101,7 +108,7 @@
     return withOptional({
       id: e.id ? String(e.id) : uid(),
       name: String(e.name || '').trim() || 'Ejercicio',
-      sets: sets >= 1 ? sets : 3,
+      sets: sets >= 1 ? Math.min(sets, MAX_SETS) : 3,
       reps: e.reps == null ? '' : String(e.reps),
       targetWeight: Number.isFinite(tw) && tw >= 0 ? tw : null,
       notes: String(e.notes || ''),
@@ -179,10 +186,10 @@
   function normSession(s) {
     s = s || {};
     const out = {
-      id: s.id ? String(s.id) : uid(),
+      id: safeDocId(s.id),
       created: Number(s.created) || Date.now(),
       updatedAt: Number(s.updatedAt) || 0,                 // marca de tiempo para la sincronización
-      date: /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : todayStr(),
+      date: isDateStr(s.date) ? s.date : todayStr(),
       dayId: String(s.dayId || ''),
       dayName: String(s.dayName || ''),
       finished: s.finished !== false,
@@ -248,7 +255,7 @@
     const byDate = new Map();
     (Array.isArray(list) ? list : []).forEach((x) => {
       const kg = Number(x && x.kg);
-      if (x && /^\d{4}-\d{2}-\d{2}$/.test(x.date) && Number.isFinite(kg) && kg > 0 && kg < 500) byDate.set(x.date, kg);
+      if (x && isDateStr(x.date) && Number.isFinite(kg) && kg > 0 && kg < 500) byDate.set(x.date, kg);
     });
     return [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, kg]) => ({ date, kg }));
   }
@@ -411,7 +418,7 @@
 
   /** Carga la rutina de ejemplo (la de quien instala la app por primera vez): primero ejemplo.json
    *  por fetch; si no se puede (por ej. al abrir index.html con file://), su copia en seed.js.
-   *  rutina.json (la rutina de Bryan) ya no se carga sola: queda en la nube de cada uno. */
+   *  rutina.json ya no se carga sola: queda en la nube de cada uno. */
   async function loadSeed() {
     try {
       const res = await fetch('ejemplo.json', { cache: 'no-store' });
@@ -1245,18 +1252,27 @@
   /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer. */
   function replaceRoutine(routine) {
     try {
-      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), routine: state.routine }));
+      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), owner: localOwner(), routine: state.routine }));
     } catch (e) { /* nada */ }
     state.routine = routine;
     commit();                                  // dispara la subida a la nube
   }
 
-  const hasRoutineBackup = () => { try { return !!localStorage.getItem(ROUTINE_BACKUP_KEY); } catch (e) { return false; } };
+  const localOwner = () => { try { return localStorage.getItem(OWNER_KEY) || ''; } catch (e) { return ''; } };
+  /** La copia de rutina, solo si es de la cuenta actual (en un teléfono compartido, la de otro no se ofrece). */
+  const myRoutineBackup = () => {
+    try {
+      const b = JSON.parse(localStorage.getItem(ROUTINE_BACKUP_KEY));
+      return b && (b.owner || '') === localOwner() ? b : null;
+    } catch (e) { return null; }
+  };
+  const hasRoutineBackup = () => !!myRoutineBackup();
 
   /** Vuelve a la rutina anterior a la última importación. Devuelve true si pudo. */
   function restoreRoutineBackup() {
     try {
-      const b = JSON.parse(localStorage.getItem(ROUTINE_BACKUP_KEY));
+      const b = myRoutineBackup();
+      if (!b) return false;
       state.routine = normalize({ routine: b.routine }).routine;
       localStorage.removeItem(ROUTINE_BACKUP_KEY);
       commit();
@@ -1266,7 +1282,8 @@
 
   /** CSV (separador ";" y coma decimal para abrir bien en Excel es-AR). */
   function exportCSV() {
-    const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    // Un apóstrofo adelante evita que Excel tome un nombre importado como fórmula.
+    const q = (v) => '"' + String(v == null ? '' : v).replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""') + '"';
     const n = (v) => (v == null ? '' : String(v).replace('.', ','));
     const rows = [['Fecha', 'Día', 'Ejercicio', 'Serie', 'Peso (' + state.weightUnit + ')', 'Reps', 'Peso drop (' + state.weightUnit + ')', 'Reps drop', 'Nota'].map(q).join(';')];
     sortedSessions().forEach((s) => {
