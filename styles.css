@@ -68,6 +68,44 @@
   }
 }
 
+/* Paletas: solo cambian el acento; lima es la de fábrica (los valores de arriba).
+   Cada una trae su versión clara. No usar naranja ni rojo: se confundirían con --warn y --danger.
+   Si se agrega una, sumarla también a PALETTES en app.js. */
+:root[data-palette="menta"] {
+  --accent: #3ee6b0; --accent-fill: #3ee6b0; --accent-text: #02100c; --ok: #3ee6b0;
+  --accent-soft: rgba(62, 230, 176, .13); --accent-line: rgba(62, 230, 176, .34);
+}
+:root[data-palette="celeste"] {
+  --accent: #5cc8ff; --accent-fill: #5cc8ff; --accent-text: #020d14; --ok: #5cc8ff;
+  --accent-soft: rgba(92, 200, 255, .13); --accent-line: rgba(92, 200, 255, .34);
+}
+:root[data-palette="violeta"] {
+  --accent: #b69cff; --accent-fill: #b69cff; --accent-text: #0c0816; --ok: #b69cff;
+  --accent-soft: rgba(182, 156, 255, .13); --accent-line: rgba(182, 156, 255, .34);
+}
+:root[data-palette="rosa"] {
+  --accent: #ff7ab8; --accent-fill: #ff7ab8; --accent-text: #16040d; --ok: #ff7ab8;
+  --accent-soft: rgba(255, 122, 184, .13); --accent-line: rgba(255, 122, 184, .34);
+}
+@media (prefers-color-scheme: light) {
+  :root[data-palette="menta"] {
+    --accent: #00705a; --ok: #00705a;
+    --accent-soft: rgba(62, 230, 176, .14); --accent-line: rgba(0, 112, 90, .4);
+  }
+  :root[data-palette="celeste"] {
+    --accent: #00639b; --ok: #00639b;
+    --accent-soft: rgba(92, 200, 255, .14); --accent-line: rgba(0, 99, 155, .4);
+  }
+  :root[data-palette="violeta"] {
+    --accent: #6a3fd1; --ok: #6a3fd1;
+    --accent-soft: rgba(182, 156, 255, .14); --accent-line: rgba(106, 63, 209, .4);
+  }
+  :root[data-palette="rosa"] {
+    --accent: #b81e6b; --ok: #b81e6b;
+    --accent-soft: rgba(255, 122, 184, .14); --accent-line: rgba(184, 30, 107, .4);
+  }
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -566,6 +604,14 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .opt input[type="checkbox"]:checked::after { transform: translateX(20px); }
 .opt input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .opt input[type="checkbox"], .opt input[type="checkbox"]::after { transition: none; } }
+
+/* Elegir paleta */
+.pals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+button.pal { min-height: 0; padding: 6px 0; background: none; color: var(--muted); font-size: .75rem; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+button.pal[aria-checked="true"] { color: var(--text); font-weight: 650; }
+.pal i { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; }
+.pal i svg { width: 20px; height: 20px; }
+.pal[aria-checked="true"] i { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--text); }
 
 /* Historial: elegir días para compartir */
 .sharebar { position: sticky; top: calc(8px + env(safe-area-inset-top)); z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; margin: 0 0 12px; background: var(--material); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-radius: var(--radius-sm); }

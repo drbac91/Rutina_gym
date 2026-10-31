@@ -1305,6 +1305,33 @@
     return m[e.code] || ('No se pudo iniciar sesión: ' + (e.message || e.code || e));
   }
 
+  /** Paletas probadas (colores en styles.css). `fill` y `text` son para dibujar la muestra. */
+  const PALETTES = [
+    { id: 'lima', name: 'Lima', fill: '#c6f432', text: '#0b0d02' },
+    { id: 'menta', name: 'Menta', fill: '#3ee6b0', text: '#02100c' },
+    { id: 'celeste', name: 'Celeste', fill: '#5cc8ff', text: '#020d14' },
+    { id: 'violeta', name: 'Violeta', fill: '#b69cff', text: '#0c0816' },
+    { id: 'rosa', name: 'Rosa', fill: '#ff7ab8', text: '#16040d' },
+  ];
+  const currentPalette = () => {
+    const id = S.getPref('palette');
+    return PALETTES.some((p) => p.id === id) ? id : 'lima';
+  };
+  const applyPalette = () => { document.documentElement.dataset.palette = currentPalette(); };
+  applyPalette();
+
+  function paletteRow() {
+    const now = currentPalette();
+    return `
+      <div>
+        <b>Color</b>
+        <div class="pals" role="radiogroup" aria-label="Color de la app">
+          ${PALETTES.map((p) => `<button class="pal" role="radio" aria-checked="${p.id === now}" data-act="palette" data-id="${p.id}">
+            <i style="background:${p.fill};color:${p.text}">${p.id === now ? ICON.check : ''}</i>${p.name}</button>`).join('')}
+        </div>
+      </div>`;
+  }
+
   /** Opciones de qué ver. Son de ESTE dispositivo: no se sincronizan y esconder algo no borra nada. */
   function optionsCard() {
     const row = (k, title, hint) => `
@@ -1314,6 +1341,7 @@
       <div class="card stack">
         <h2>Opciones</h2>
         <p class="muted">Elegí qué ver. Son de este dispositivo: en tu otro teléfono o compu se eligen aparte. Esconder algo no borra lo que ya cargaste.</p>
+        ${paletteRow()}
         ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
         ${row('rirPrev', 'RIR de la vez anterior', 'Junto a "Última vez", muestra el RIR que anotaste. Solo se ve si el RIR está prendido.')}
         ${row('rpe', 'RPE por ejercicio', 'Un casillero por ejercicio para anotar qué tan duro fue (1 a 10). También se ve en el Historial.')}
@@ -1932,6 +1960,7 @@
       case 'help-reset': S.resetHelp(); ui.helpOpen.clear(); toast(S.opt('help') ? 'Las ayudas vuelven a verse' : 'Listo. Para verlas, prendé "Ayudas y explicaciones"'); render(); break;
       case 'tour': runTour(); break;
       case 'tour-skip': S.setPref('tour', 1); render(); break;
+      case 'palette': S.setPref('palette', btn.dataset.id); applyPalette(); render(); break;
       case 'help-ok': S.setPref('help.' + btn.dataset.help, 1); ui.helpOpen.delete(btn.dataset.help); render(); break;
       case 'help-show': ui.helpOpen.add(btn.dataset.help); render(); break;
       case 'export-json':
