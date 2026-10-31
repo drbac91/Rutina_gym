@@ -39,6 +39,17 @@
 
   const isRevisar = (txt) => /\bREVISAR\b/.test(txt || '');
 
+  /* Íconos de línea (mismo trazo que la barra inferior); el tamaño lo da el texto o el CSS. */
+  const icon = (d) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+  const ICON = {
+    check: icon('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    close: icon('<path d="M6 6l12 12M18 6L6 18"/>'),
+    chevron: icon('<path d="M9.5 5.5L16 12l-6.5 6.5"/>'),
+    arrow: icon('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+    trash: icon('<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>'),
+    barbell: icon('<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>'),
+  };
+
   /* Ayudas: se ven abiertas hasta tocar "Entendido" (se recuerda en este dispositivo); después
      queda un ⓘ junto al título que las vuelve a abrir. Los avisos (sesión de ayer, backup) no van acá. */
   const helpSeen = (id) => !!S.getPref('help.' + id);
@@ -192,11 +203,21 @@
       <div class="note"><b>¿Primera vez?</b> Hay un recorrido de 1 minuto.
         <div class="row" style="margin-top:8px"><button class="primary" data-act="tour">Ver recorrido</button>
         <button data-act="tour-skip">Ahora no</button></div></div>` : '';
-    return `<h1>¿Qué día entrenás?</h1>${tourCard}${exampleNote()}` + days.map((d) => `
-      <button class="day-btn block ${d.id === next ? 'primary' : ''}" style="margin-bottom:10px" data-act="start" data-day="${esc(d.id)}">
+    // El día sugerido es el protagonista; los demás quedan en una lista tranquila.
+    const nextDay = days.find((d) => d.id === next);
+    const hero = nextDay ? `
+      <button class="hero block" data-act="start" data-day="${esc(nextDay.id)}">
+        <span class="eyebrow">Sugerido hoy</span>
+        <span class="hero-name">${esc(nextDay.name)}</span>
+        <span class="hero-meta">${nextDay.exercises.length} ejercicios${when(nextDay)}</span>
+        <span class="hero-go">Empezar ${ICON.arrow}</span>
+      </button>` : '';
+    const others = days.filter((d) => d !== nextDay).map((d) => `
+      <button class="day-btn" data-act="start" data-day="${esc(d.id)}">
         <span>${esc(d.name)}<small>${d.exercises.length} ejercicios${when(d)}</small></span>
-        <span>${d.id === next ? 'Sugerido hoy ▸' : '▸'}</span>
+        ${ICON.chevron}
       </button>`).join('');
+    return `<h1>¿Qué día entrenás?</h1>${tourCard}${exampleNote()}${hero}${others ? `<div class="card daylist">${others}</div>` : ''}`;
   }
 
   /** ¿La rutina es todavía la de fábrica (ejemplo.json, o rutina.json en instalaciones viejas) y nunca
@@ -290,8 +311,8 @@
           <div class="ssset ${done ? 'done' : ''}">
             <span class="n">${j + 1}</span>
             <div class="sslines">${lines}</div>
-            <button class="chk" data-act="toggle-set" aria-label="Serie completa hecha">✓</button>
-            <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+            <button class="chk" data-act="toggle-set" aria-label="Serie completa hecha">${ICON.check}</button>
+            <button class="x" data-act="del-set" aria-label="Quitar serie">${ICON.close}</button>
           </div>
         </div>`);
     }
@@ -315,8 +336,21 @@
       </section>`;
   }
 
+  /** Barra fija de avance de la sesión: series hechas sobre el total. */
+  let sessShown = null;   // sesión dibujada (la usa refreshCard para actualizar la barra)
+  function sessCount(s) {
+    const sets = s.exercises.flatMap((ex) => ex.sets), done = sets.filter((st) => st.done).length;
+    return { done, total: sets.length, pct: sets.length ? Math.round((done / sets.length) * 100) : 0 };
+  }
+  function sessBarHtml(s) {
+    const c = sessCount(s);
+    return `<span><b>${c.done}</b> de ${c.total} series</span>
+      <span class="sess-track"><i style="width:${c.pct}%"></i></span>`;
+  }
+
   function trainSession(s) {
     const editing = !!ui.editId;
+    sessShown = s;
     const exCards = S.groupRuns(s.exercises).map((idxs) =>
       idxs.length > 1 ? supersetCard(s, idxs) : exerciseCard(s, s.exercises[idxs[0]], idxs[0])).join('');
 
@@ -335,10 +369,11 @@
       ${back}
       <h1>${esc(s.dayName || 'Sesión')} ${editing ? '<span class="badge">editando</span>' : ''}${helpBtn('session')}</h1>
       ${stale}
-      <div class="card">
+      <div class="date-row">
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
+      <div class="sess-bar" id="sess-bar">${sessBarHtml(s)}</div>
       ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.' + (S.opt('rir') ? ' <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.' : ''))}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
       <div class="stack">
@@ -469,8 +504,8 @@
         <span class="n">${j + 1}</span>
         ${weightField(st, ex, false, 'Peso')}
         <input class="reps" inputmode="numeric" data-f="reps" value="${st.reps ?? ''}" placeholder="0" aria-label="Repeticiones">
-        <button class="chk" data-act="toggle-set" aria-label="Serie hecha">✓</button>
-        <button class="x" data-act="del-set" aria-label="Quitar serie">×</button>
+        <button class="chk" data-act="toggle-set" aria-label="Serie hecha">${ICON.check}</button>
+        <button class="x" data-act="del-set" aria-label="Quitar serie">${ICON.close}</button>
         ${totCaption(st, ex, false)}
         ${rirInput(st)}
       </div>${drop}
@@ -492,6 +527,12 @@
     const btn = card.querySelector('[data-act="complete-ex"]');
     btn.textContent = all ? 'Desmarcar todo' : '✓ Completar';
     btn.classList.toggle('ok', !all);
+    const bar = document.getElementById('sess-bar');   // sin redibujar: el teclado y el foco siguen donde estaban
+    if (bar && sessShown) {
+      const c = sessCount(sessShown);
+      bar.querySelector('b').textContent = c.done;
+      bar.querySelector('i').style.width = c.pct + '%';
+    }
   }
 
   /** Avisos antes de marcar series con valores que suelen ser un error: pesos o reps enormes, o un
@@ -617,13 +658,13 @@
     const since = S.sessionsSinceExport();
     const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
       <div class="note revisar">Hace <b>${since} entrenamientos</b> que no exportás un backup y tus datos están solo en este teléfono.
-        <button class="block" style="margin-top:8px" data-act="export-json">⬇ Exportar backup ahora</button></div>` : '';
+        <button class="block" style="margin-top:8px" data-act="export-json">Exportar backup ahora</button></div>` : '';
     const sel = ui.sel;
     const bar = sel ? `
       <div class="sharebar"><span><b>${sel.size}</b> elegido(s)</span>
         <button class="primary" data-act="share-go" ${sel.size ? '' : 'disabled'}>Enviar</button>
         <button data-act="share-cancel">Cancelar</button></div>`
-      : '<button class="block" data-act="share-start">Compartir días por WhatsApp…</button>';
+      : '<button class="quiet" data-act="share-start">Compartir días por WhatsApp…</button>';
     return '<h1>Historial</h1>' + remind + bar + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
@@ -634,7 +675,7 @@
         const rirs = S.opt('rir') ? ex.sets.filter((x) => x.done && x.rir != null).map((x) => x.rir) : [];
         const rirTxt = rirs.length ? `RIR ${Math.min(...rirs) === Math.max(...rirs) ? Math.min(...rirs) : Math.min(...rirs) + '–' + Math.max(...rirs)}` : '';
         const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', rirTxt, S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
-        return `<div class="hist-ex"><b>${esc(ex.name)}:</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">· ${extra}</span>` : ''}</div>`;
+        return `<div class="hist-ex"><b>${esc(ex.name)}</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">${extra}</span>` : ''}</div>`;
       }).join('');
       return `
       <article class="card ${sel && sel.has(s.id) ? 'picked' : ''}" data-sid="${esc(s.id)}">
@@ -693,9 +734,7 @@
   function viewProgress() {
     const names = S.exerciseNames();
     if (!names.length) {
-      return `<h1>Progreso</h1>${cyclesCard()}
-        <div class="card"><h2>Por ejercicio</h2><p class="muted">Cuando termines tu primera sesión vas a ver acá el gráfico de cada ejercicio.</p></div>
-        ${weekCard()}${muscleCard()}${stallsCard()}${bodyweightCard()}${dayChartCard()}${cycleChartCard()}`;
+      return progPage('<div class="card"><h2>Por ejercicio</h2><p class="muted">Cuando termines tu primera sesión vas a ver acá el gráfico de cada ejercicio.</p></div>');
     }
     if (ui.progKey == null) ui.progKey = S.getPref('progKey');        // el último elegido en este dispositivo
     if (!names.some((n) => n.key === ui.progKey)) {
@@ -719,9 +758,7 @@
       varCls = pct > 0 ? 'up' : pct < 0 ? 'down' : '';
     }
 
-    return `
-      <h1>Progreso</h1>
-      ${cyclesCard()}
+    return progPage(`
       <div class="card">
         <h2>Por ejercicio</h2>
         <label for="p-ex">Ejercicio</label>
@@ -736,13 +773,24 @@
           <div class="stat"><b class="${varCls}">${varTxt}</b><span>vs. hace 4 sem.${old ? '' : ' (sin datos)'}</span></div>
         </div>
         ${e1rmBlock()}
-      </div>
-      ${weekCard()}
-      ${muscleCard()}
-      ${stallsCard()}
-      ${bodyweightCard()}
-      ${dayChartCard()}
-      ${cycleChartCard()}`;
+      </div>`);
+  }
+
+  /** Progreso en cuatro secciones, para no recorrer una tira larga (la elegida se recuerda en este dispositivo). */
+  const PROG_SECS = [['summary', 'Resumen'], ['exercise', 'Ejercicio'], ['muscles', 'Músculos'], ['body', 'Cuerpo']];
+  function progPage(exerciseHtml) {
+    if (ui.progSec == null) ui.progSec = S.getPref('progSec');
+    if (!PROG_SECS.some(([k]) => k === ui.progSec)) ui.progSec = 'summary';
+    const body = {
+      summary: () => cyclesCard() + weekCard() + dayChartCard() + cycleChartCard(),
+      exercise: () => exerciseHtml + stallsCard(),
+      muscles: () => muscleCard() || '<p class="empty">Terminá una sesión para ver tus series por músculo.</p>',
+      body: () => bodyweightCard(),
+    }[ui.progSec]();
+    return `<h1>Progreso</h1>
+      <div class="seg" role="group" aria-label="Sección de Progreso">${PROG_SECS.map(([k, label]) =>
+        `<button data-act="prog-sec" data-sec="${k}" aria-pressed="${k === ui.progSec}">${label}</button>`).join('')}</div>
+      ${body}`;
   }
 
   /* ---------- 1RM estimado, semana, músculos, estancamientos y peso corporal ---------- */
@@ -834,7 +882,7 @@
     const curDate = pts.filter((x) => x.date <= S.todayStr()).pop();
     const recent = pts.slice(-5).reverse().map((x) => `
         <div class="bwrow"><span>${esc(fmtDate(x.date))}</span><b>${fmt(x.kg)} ${unit()}</b>
-          <button class="x" data-act="bw-del" data-date="${esc(x.date)}" aria-label="Borrar el registro del ${esc(fmtShort(x.date))}">×</button></div>`).join('');
+          <button class="x" data-act="bw-del" data-date="${esc(x.date)}" aria-label="Borrar el registro del ${esc(fmtShort(x.date))}">${ICON.close}</button></div>`).join('');
     return `
       <div class="card">
         <h2>Peso corporal</h2>
@@ -860,13 +908,13 @@
     const x = (i) => padL + (n === 1 ? iw / 2 : (iw * i) / (n - 1));
     const y = (v) => padT + ih - ((v - lo) / (hi - lo)) * ih;
     let g = '';
-    for (let k = 0; k <= 4; k++) {
+    for (let k = 0; k <= 4; k += 2) {
       const yy = padT + (ih * k) / 4;
       g += `<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" style="stroke:var(--sep)" stroke-width="1"/>`;
       g += `<text x="${padL - 6}" y="${yy + 3.5}" text-anchor="end" class="ax">${shortNum(hi - ((hi - lo) * k) / 4)}</text>`;
     }
     g += `<path d="${values.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ')}" class="ln"/>`;
-    values.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" class="pt"><title>${esc(titles[i])}</title></circle>`; });
+    values.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" class="pt"><title>${esc(titles[i])}</title></circle>`; });
     const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 48))));
     labels.forEach((l, i) => {
       const anchor = n > 1 && i === 0 ? 'start' : n > 1 && i === n - 1 ? 'end' : 'middle';
@@ -947,7 +995,7 @@
     : v >= 1000 ? fmt(Math.round(v / 100) / 10) + 'k' : v < 10 ? fmt(Math.round(v * 10) / 10) : fmt(Math.round(v)));
 
   /** Gráfico de barras (+ línea opcional en eje derecho) en SVG propio, al ancho exacto del contenedor.
-   *  Usa los mismos colores del gráfico por ejercicio: barras grises, línea azul. */
+   *  Usa los mismos colores del gráfico por ejercicio: barras grises, línea del acento. */
   function svgChart({ labels, bars, line, barName, lineName, titles, width, barCls, sub }) {
     const W = Math.max(240, Math.floor(width)), H = sub ? 242 : 230;
     const padL = 40, padR = line ? 40 : 10, padT = 30, padB = sub ? 42 : 30;
@@ -962,7 +1010,7 @@
     const bw = Math.max(3, Math.min(34, (iw / n) * 0.62));
     const yB = (v) => padT + ih - (v / maxB) * ih, yL = (v) => padT + ih - (v / maxL) * ih;
     let g = '';
-    for (let k = 0; k <= 4; k++) {                       // líneas guía y escalas
+    for (let k = 0; k <= 4; k += 2) {                    // líneas guía y escalas
       const y = padT + (ih * k) / 4;
       g += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" style="stroke:var(--sep)" stroke-width="1"/>`;
       g += `<text x="${padL - 6}" y="${y + 3.5}" text-anchor="end" class="ax">${shortNum(maxB * (1 - k / 4))}</text>`;
@@ -973,7 +1021,7 @@
     });
     if (line) {
       g += `<path d="${line.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + yL(v).toFixed(1)).join(' ')}" class="ln"/>`;
-      line.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${yL(v).toFixed(1)}" r="4" class="pt"><title>${esc(titles[i])}</title></circle>`; });
+      line.forEach((v, i) => { g += `<circle cx="${x(i).toFixed(1)}" cy="${yL(v).toFixed(1)}" r="3" class="pt"><title>${esc(titles[i])}</title></circle>`; });
     }
     const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(iw / 48))));   // etiquetas sin pisarse
     labels.forEach((l, i) => {
@@ -1048,19 +1096,19 @@
         labels: points.map((x) => fmtShort(x.date)),
         datasets: [
           { type: 'line', label: `Peso máx (${unit()})`, data: points.map((x) => x.maxWeight), yAxisID: 'y',
-            borderColor: c('--accent'), backgroundColor: c('--accent'), tension: .25, pointRadius: 4, order: 0 },
+            borderColor: c('--accent'), backgroundColor: c('--accent'), borderWidth: 2.25, tension: .3, pointRadius: 3, order: 0 },
           { type: 'bar', label: 'Volumen', data: points.map((x) => x.volume), yAxisID: 'y1',
-            backgroundColor: c('--muted') + '55', order: 1 },
+            backgroundColor: c('--muted') + '44', borderRadius: 3, order: 1 },
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { color: c('--text'), usePointStyle: true, boxWidth: 8, boxHeight: 8 } } },
+        plugins: { legend: { align: 'start', labels: { color: c('--muted'), usePointStyle: true, boxWidth: 7, boxHeight: 7, font: { size: 11 } } } },
         scales: {
-          x: { ticks: { color: c('--muted') }, grid: { color: c('--border') } },
-          y: { position: 'left', beginAtZero: true, ticks: { color: c('--accent') }, grid: { color: c('--border') } },
-          y1: { position: 'right', beginAtZero: true, ticks: { color: c('--muted') }, grid: { drawOnChartArea: false } },
+          x: { ticks: { color: c('--muted'), font: { size: 10 } }, grid: { display: false }, border: { display: false } },
+          y: { position: 'left', beginAtZero: true, ticks: { color: c('--accent'), font: { size: 10 }, maxTicksLimit: 4 }, grid: { color: c('--sep') }, border: { display: false } },
+          y1: { position: 'right', beginAtZero: true, ticks: { color: c('--muted'), font: { size: 10 }, maxTicksLimit: 4 }, grid: { drawOnChartArea: false }, border: { display: false } },
         },
       },
     });
@@ -1109,7 +1157,7 @@
         <input class="day-name" data-df="name" value="${esc(d.name)}" aria-label="Nombre del día">
         <button class="fixed icon" data-act="day-up" ${di === 0 ? 'disabled' : ''} aria-label="Subir día">↑</button>
         <button class="fixed icon" data-act="day-down" ${di === n - 1 ? 'disabled' : ''} aria-label="Bajar día">↓</button>
-        <button class="fixed icon danger" data-act="del-day" aria-label="Borrar día">🗑</button>
+        <button class="fixed icon danger" data-act="del-day" aria-label="Borrar día">${ICON.trash}</button>
       </div>
       ${(() => {
         const inSS = new Set(S.groupRuns(d.exercises).filter((r) => r.length > 1).flat());
@@ -1188,7 +1236,7 @@
         <label>Notas</label>
         <textarea data-rf="notes" class="${rev ? 'revisar-box' : ''}">${esc(e.notes)}</textarea>
         ${e.original ? `<div class="original">Original del PDF: ${esc(e.original)}</div>` : ''}
-        ${ei < n - 1 ? `<button class="block" style="margin-top:10px" data-act="toggle-ss">${linkedNext ? '⛓ Quitar superserie con el siguiente' : '⛓ Hacer superserie con el siguiente'}</button>` : ''}
+        ${ei < n - 1 ? `<button class="block" style="margin-top:10px" data-act="toggle-ss">${linkedNext ? 'Quitar superserie con el siguiente' : 'Hacer superserie con el siguiente'}</button>` : ''}
         <div class="row" style="margin-top:10px">
           <button data-act="ex-up" ${ei === 0 ? 'disabled' : ''}>↑ Subir</button>
           <button data-act="ex-down" ${ei === n - 1 ? 'disabled' : ''}>↓ Bajar</button>
@@ -1231,7 +1279,7 @@
   function viewLogin() {
     return `
       <div class="login">
-        <div class="logo">🏋️</div>
+        <div class="logo">${ICON.barbell}</div>
         <h1>Mi Rutina</h1>
         <p class="muted">Anotá tus entrenamientos: series, pesos y repeticiones. Tus datos se guardan en este teléfono.</p>
         ${deniedText() ? `<p class="err">${esc(deniedText())}</p>` : ''}
@@ -1287,25 +1335,25 @@
         <p class="muted">${n} sesión(es) guardadas. ${window.Cloud && Cloud.user
           ? 'Se guardan en este dispositivo y en la nube. Igual conviene exportar un backup de vez en cuando.'
           : 'Tus datos viven solo en este dispositivo: hacé un backup de vez en cuando.'}</p>
-        <button class="primary block" data-act="export-json">⬇ Exportar backup (JSON)</button>
-        <button class="block" data-act="import-json">⬆ Restaurar un backup (reemplaza todo)</button>
+        <button class="primary block" data-act="export-json">Exportar backup (JSON)</button>
+        <button class="block" data-act="import-json">Restaurar un backup (reemplaza todo)</button>
         <input type="file" id="file" accept="application/json,.json" hidden>
       </div>
       ${backupsCard()}
       <div class="card stack">
         <h2>Planilla</h2>
-        <button class="block" data-act="export-csv">⬇ Exportar historial (CSV)</button>
+        <button class="block" data-act="export-csv">Exportar historial (CSV)</button>
       </div>
       <div class="card stack">
         <h2>Cambiar la rutina</h2>
         <p class="muted">Reemplaza solo los días y ejercicios. <b>Tu historial no se toca.</b> Antes de aplicar te muestra un resumen y se guarda la rutina anterior para poder deshacer.</p>
-        <button class="primary block" data-act="import-routine-file">⬆ Importar rutina (archivo JSON)</button>
+        <button class="primary block" data-act="import-routine-file">Importar rutina (archivo JSON)</button>
         <input type="file" id="file-routine" accept="application/json,.json" hidden>
-        <button class="block" data-act="toggle-paste">${ui.pasteOpen ? 'Cancelar' : '📋 Importar rutina pegando texto'}</button>
+        <button class="block" data-act="toggle-paste">${ui.pasteOpen ? 'Cancelar' : 'Importar rutina pegando texto'}</button>
         ${ui.pasteOpen ? `
           <textarea id="paste-json" rows="8" placeholder='Pegá acá el JSON de la rutina' spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
           <button class="primary block" data-act="apply-paste">Aplicar rutina pegada</button>` : ''}
-        ${S.hasRoutineBackup() ? '<button class="block" data-act="undo-routine">↩ Deshacer última importación de rutina</button>' : ''}
+        ${S.hasRoutineBackup() ? '<button class="block" data-act="undo-routine">Deshacer última importación de rutina</button>' : ''}
       </div>
       <div class="card stack">
         <h2>Rutina de ejemplo</h2>
@@ -1331,7 +1379,7 @@
         <h2>Copias automáticas</h2>
         <p class="muted">La app guarda lo que tenías antes de reemplazar tus datos. Recuperar una copia reemplaza lo de ahora, que a su vez queda como copia.</p>
         ${list.map((b) => `
-          <button class="block" data-act="restore-backup" data-at="${b.at}">↩ Recuperar ${esc(copyName(b.at))}
+          <button class="block" data-act="restore-backup" data-at="${b.at}">Recuperar ${esc(copyName(b.at))}
             <small class="muted btn-sub">${b.sessions} sesión(es) · ${b.days} día(s) de rutina${BACKUP_WHY[b.reason] ? ' · ' + BACKUP_WHY[b.reason] : ''}</small></button>`).join('')}
       </div>`;
   }
@@ -1887,6 +1935,7 @@
         S.markExported(); toast('Backup descargado'); if (ui.tab === 'history') render();
         break;
       case 'export-csv': download(`historial-gym-${S.todayStr()}.csv`, S.exportCSV(), 'text/csv;charset=utf-8'); toast('CSV descargado'); break;
+      case 'prog-sec': ui.progSec = btn.dataset.sec; S.setPref('progSec', ui.progSec); render(); window.scrollTo(0, 0); break;
       case 'import-json': document.getElementById('file').click(); break;
       case 'restore-backup': {
         const at = Number(btn.dataset.at);
