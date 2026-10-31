@@ -1453,8 +1453,12 @@
     updateSyncBadge();
     if (gated()) { $view.innerHTML = viewLogin(); return; }
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
+    const y = window.scrollY;
     $view.innerHTML = views[ui.tab]();
-    if (ui.tab === 'progress') { drawChart(); drawSvgCharts(); }
+    if (ui.tab === 'progress') {
+      drawChart(); drawSvgCharts();
+      window.scrollTo(0, y);   // Safari sube la página mientras los gráficos están vacíos
+    }
   }
 
   /** Indicador chico arriba a la derecha con el estado de la sincronización. */
