@@ -254,6 +254,44 @@
     return `${t.sets || ex.sets.length}×${esc(t.reps)}${t.weight != null ? ' · ' + fmt(t.weight) + ' ' + unit() : ''}`;
   };
 
+  /** Reps para el objetivo: las de la rutina si se pueden usar en el 1RM estimado ('8-10' = 8,
+   *  '10-10' = 10); si no ('12-15', '1 min'), las de la marca. */
+  function stallReps(ex, best) {
+    const m = /^\s*(\d+)\s*(?:-\s*\d+\s*)?$/.exec(String((ex.target || {}).reps ?? ''));
+    const n = m ? Number(m[1]) : 0;
+    return n >= 1 && n <= S.E1RM_MAX_REPS ? n : best.reps;
+  }
+
+  /** Aviso de estancamiento en la tarjeta. Solo en la sesión en curso; si una serie marcada ya
+   *  supera la marca, felicita en vez de avisar. */
+  function stallNote(s, i, withName) {
+    const ex = s.exercises[i];
+    const x = !s.finished && S.stallOf(S.exKey(ex.name));
+    if (!x) return '';
+    const who = withName ? esc(ex.name) + ': ' : '';
+    const attrs = `data-stall="${i}" data-named="${withName ? 1 : ''}"`;
+    const top = ex.sets.reduce((a, st) => {
+      const v = st.done ? S.e1rm(st.weight, st.reps) : null;
+      return v != null && (!a || v > a.v) ? { v, st } : a;
+    }, null);
+    if (top && top.v > x.before) {
+      return `<div class="note stall-ok" ${attrs}><b>${who}Superaste tu marca:</b> ${fmt(top.st.weight)} ${unit()} × ${top.st.reps}</div>`;
+    }
+    const mode = loadMode(ex), reps = stallReps(ex, x.best);
+    const step = mode === 'bricks' ? S.BRICK_KG : unit() === 'lb' ? 5 : 2.5;
+    const bar = mode === 'bar' && ex.bar != null ? ex.bar : 0;
+    const w = S.stallGoal(x.before, reps, step, bar);
+    const how = bar ? ` (${fmt((w - bar) / 2)} por lado)` : mode === 'bricks' ? ` (${fmt(w / S.BRICK_KG)} bloques)` : '';
+    return `<div class="note revisar" ${attrs}><b>${who}Estancado:</b> ${x.sessions} sesiones sin superar tu marca. Para superarla: <b>${fmt(w)} ${unit()} × ${reps}</b>${how}</div>`;
+  }
+
+  /** Vuelve a calcular los avisos de una tarjeta sin redibujarla. */
+  function refreshStall(card) {
+    card.querySelectorAll('[data-stall]').forEach((n) => {
+      n.outerHTML = stallNote(sessShown, Number(n.dataset.stall), !!n.dataset.named);
+    });
+  }
+
   /** Tarjeta de un ejercicio normal. */
   function exerciseCard(s, ex, i) {
     return `
@@ -261,6 +299,7 @@
         <div class="ex-head"><h3>${esc(ex.name)}${ex.drop ? helpBtn('drop') : ''}</h3><span class="target">${targetText(ex)}</span></div>
         ${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
+        ${stallNote(s, i)}
         ${barPicker(ex, i)}
         ${ex.drop ? helpBox('drop', '↳ <b>Drop set:</b> cada serie tiene una segunda parte sin descanso, con menos peso.') : ''}
         <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>${S.opt('rir') ? 'reps · RIR' : 'reps'}</span><span></span><span></span></div>
@@ -325,6 +364,7 @@
         ${helpBox('superset', 'Hacé una serie de cada ejercicio, uno tras otro, y recién ahí descansá. El ✓ marca la vuelta completa.')}
         ${notes}
         ${prevs}
+        ${idxs.map((i) => stallNote(s, i, true)).join('')}
         ${idxs.map((i) => barPicker(s.exercises[i], i, s.exercises[i].name)).join('')}
         ${rows.join('')}
         <div class="row" style="margin-top:8px">
@@ -527,6 +567,7 @@
     const btn = card.querySelector('[data-act="complete-ex"]');
     btn.textContent = all ? 'Desmarcar todo' : '✓ Completar';
     btn.classList.toggle('ok', !all);
+    refreshStall(card);
     const bar = document.getElementById('sess-bar');   // sin redibujar: el teclado y el foco siguen donde estaban
     if (bar && sessShown) {
       const c = sessCount(sessShown);
@@ -862,8 +903,8 @@
     const list = S.stalls();
     const body = list.length
       ? list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> mejor antes ${fmt(x.before)} ${unit()} · últimas ${S.STALL_WEEKS} semanas ${fmt(x.after)} ${unit()} (${x.sessions} sesión/es)</div>`).join('')
-      : `<p class="muted">Ninguno: o mejoraste en las últimas ${S.STALL_WEEKS} semanas, o todavía no hay datos de antes y después para comparar.</p>`;
-    return `<div class="card"><h2>Estancamientos</h2>${body}<p class="muted">Compara tu mejor 1RM estimado de las últimas ${S.STALL_WEEKS} semanas contra el de antes.</p></div>`;
+      : `<p class="muted">Ninguno: o mejoraste en las últimas ${S.STALL_WEEKS} semanas, o todavía no hay datos de antes y después para comparar (hacen falta ${S.STALL_MIN_SESSIONS} sesiones en esas semanas).</p>`;
+    return `<div class="card"><h2>Estancamientos</h2>${body}<p class="muted">Compara tu mejor 1RM estimado de las últimas ${S.STALL_WEEKS} semanas contra el de antes. También te avisa en la tarjeta del ejercicio cuando entrenás.</p></div>`;
   }
 
   /** Peso corporal: se carga acá y cada valor rige como referencia hasta el siguiente. */
@@ -2022,6 +2063,7 @@
       if (Number.isNaN(v)) return;                 // no guarda valores inválidos
       const oldV = fieldVal(st, ex, el.dataset.f);
       setWeight(st, ex, el.dataset.f, v); S.commit(); updateTot(el, st, ex);
+      if (st.done) refreshStall(c.card);
       trackChange(el, c, el.dataset.f, oldV, v);
       return;
     }
@@ -2050,6 +2092,7 @@
       st.reps = v;
       if (st.done && !(v > 0)) { st.done = false; c.exs.forEach(syncEx); refreshCard(c.card, c.exs); }   // sin reps no cuenta como hecha
       S.commit();
+      if (st.done) refreshStall(c.card);
       trackChange(el, c, 'reps', oldV, v);
       return;
     }
