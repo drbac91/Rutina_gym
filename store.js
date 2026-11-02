@@ -48,6 +48,7 @@
   const EFFECTIVE_RIR_MAX = 3;
   /** Duraciones mayores se descartan (probablemente la sesión quedó abierta). */
   const MAX_SESSION_MINUTES = 360;
+  const REST_MAX_MIN = 15;     // el contador de descanso se esconde si pasó más que esto (ya no es un descanso)
 
   /** Grupos musculares que se pueden asignar a cada ejercicio. */
   const MUSCLES = ['Pecho', 'Dorsales', 'Espalda media', 'Trapecios', 'Lumbar', 'Hombros', 'B\u00edceps', 'Tr\u00edceps', 'Antebrazos',
@@ -1138,9 +1139,20 @@
 
   /* Opciones de visualización de ESTE dispositivo (no se sincronizan ni tocan los datos):
      esconder algo nunca borra lo guardado. Cada opción trae su valor de fábrica. */
-  const OPTION_DEFAULTS = { rir: true, rirPrev: true, rpe: false, e1rmHist: true, help: true };
+  const OPTION_DEFAULTS = { rir: true, rirPrev: true, rpe: false, e1rmHist: true, help: true, rest: false };
   function opt(k) { const v = getPref('opt.' + k); return v === undefined ? !!OPTION_DEFAULTS[k] : !!v; }
   function setOpt(k, on) { if (k in OPTION_DEFAULTS) setPref('opt.' + k, !!on); }
+  /* Contador de descanso: hora en que se marcó la última serie. Solo en este dispositivo (preferencias),
+     nunca en la sesión: así no cambia la huella de sync y sobrevive si el sistema cierra la app. */
+  function restStart(sid) { setPref('rest', { sid, at: Date.now() }); }
+  function restClear() { if (getPref('rest') !== undefined) setPref('rest', null); }
+  /** Segundos desde la última serie de ESA sesión; null si no hay o ya pasó demasiado. */
+  function restGet(sid) {
+    const r = getPref('rest');
+    if (!r || r.sid !== sid || !(r.at > 0)) return null;
+    const s = Math.floor((Date.now() - r.at) / 1000);
+    return s >= 0 && s <= REST_MAX_MIN * 60 ? s : null;
+  }
   /** Vuelve a mostrar las ayudas ⓘ que ya se leyeron. */
   function resetHelp() {
     const p = readPrefs();
@@ -1336,7 +1348,7 @@
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession, reinsertSession,
     exerciseNames, progress,
-    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp,
+    exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp, restStart, restClear, restGet,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
     parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */

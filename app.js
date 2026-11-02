@@ -385,7 +385,35 @@
   function sessBarHtml(s) {
     const c = sessCount(s);
     return `<span><b>${c.done}</b> de ${c.total} series</span>
-      <span class="sess-track"><i style="width:${c.pct}%"></i></span>`;
+      <span class="sess-track"><i style="width:${c.pct}%"></i></span>
+      <span class="sess-rest" id="sess-rest" hidden></span>`;
+  }
+
+  /* Contador de descanso (opción "rest"): tiempo desde el último ✓. Se calcula con la hora guardada,
+     no contando vueltas, y el reloj solo cambia el texto de #sess-rest: nunca redibuja ni toca el foco. */
+  let restTimer = null;
+  function restTick() {
+    const el = document.getElementById('sess-rest');
+    const secs = el && sessShown && S.opt('rest') ? S.restGet(sessShown.id) : null;
+    if (secs == null) {                                // nada que mostrar: se esconde y el reloj se apaga
+      if (el) el.hidden = true;
+      clearInterval(restTimer); restTimer = null;
+      return;
+    }
+    el.hidden = false;
+    el.textContent = `Descanso ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  }
+  /** Prende el reloj si hay algo para mostrar (tras dibujar la pantalla, tras un ✓ o al volver a la app). */
+  function restSync() {
+    clearInterval(restTimer); restTimer = null;
+    if (!document.getElementById('sess-rest')) return;
+    restTick();
+    if (!document.getElementById('sess-rest').hidden) restTimer = setInterval(restTick, 1000);
+  }
+  /** Se terminó una serie: arranca el descanso (no al editar una sesión ya guardada). */
+  function restMark(s) {
+    if (!S.opt('rest') || s.finished || ui.editId) return;
+    S.restStart(s.id); restSync();
   }
 
   function trainSession(s) {
@@ -666,7 +694,7 @@
     const live = S.find(S.state.sessions, s.id);
     if (!live) { toast('La sesión ya no existe'); ui.editId = null; go('history'); return; }
     if (choice === 'delete') {
-      S.deleteSession(live.id); ui.editId = null;
+      S.deleteSession(live.id); S.restClear(); ui.editId = null;
       toast(editing ? 'Sesión borrada del historial' : 'Sesión descartada');
       go(editing ? 'history' : 'train');
       return;
@@ -677,6 +705,7 @@
       live.exercises.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
     }
     S.finishSession(live.id);
+    S.restClear();
     ui.editId = null;
     toast((editing ? 'Cambios guardados ✓' : 'Sesión guardada ✓') + (empty ? ` · ${empty} vacía(s) sin guardar` : ''));
     go('history');
@@ -1406,6 +1435,7 @@
         ${paletteRow()}
         ${row('rir', 'RIR', 'El casillero para anotar cuántas repeticiones te quedaban, y sus números en Progreso.')}
         ${row('rirPrev', 'RIR de la vez anterior', 'Junto a "Última vez", muestra el RIR que anotaste. Solo se ve si el RIR está prendido.')}
+        ${row('rest', 'Contador de descanso', 'En la barra de la sesión, cuánto hace que marcaste la última serie. No suena: se mira.')}
         ${row('rpe', 'RPE por ejercicio', 'Un casillero por ejercicio para anotar qué tan duro fue (1 a 10). También se ve en el Historial.')}
         ${row('e1rmHist', '1RM estimado en el Historial', 'Una cifra chica por ejercicio: el 1RM de tu mejor serie de hasta 10 repeticiones.')}
         ${row('help', 'Ayudas y explicaciones', 'Los cuadros de ayuda y el botón ⓘ. Los avisos importantes se ven siempre.')}
@@ -1549,6 +1579,7 @@
       drawChart(); drawSvgCharts();
       window.scrollTo(0, y);   // Safari sube la página mientras los gráficos están vacíos
     }
+    restSync();
   }
 
   /** Indicador chico arriba a la derecha con el estado de la sincronización. */
@@ -1777,6 +1808,7 @@
         if (turnOn && !okToMark(c.exs.flatMap((e) => (e.sets[c.j] ? warnings(c.s, e, [e.sets[c.j]]) : [])))) break;
         sts.forEach((x) => { x.done = turnOn; });
         c.exs.forEach(syncEx); S.commit(); refreshCard(c.card, c.exs);
+        if (turnOn) restMark(c.s);
         if (turnOn) {                                      // pulso en el tilde, en el mismo instante
           const chk = c.row.querySelector('.chk');
           chk.classList.remove('pop'); void chk.offsetWidth; chk.classList.add('pop');
@@ -1830,12 +1862,12 @@
           if (skipped) toast(`${skipped} serie(s) sin reps quedaron sin marcar`);
         }
         S.commit(); refreshCard(c.card, c.exs);
-        if (c.exs.every((e) => e.done)) haptic(18);
+        if (c.exs.every((e) => e.done)) { haptic(18); restMark(c.s); }
         break;
       }
       case 'finish': finishSession(); break;
       case 'discard':
-        if (confirm('¿Descartar esta sesión? Se pierde lo cargado.')) { S.deleteSession(c.s.id); toast('Sesión descartada'); render(); }
+        if (confirm('¿Descartar esta sesión? Se pierde lo cargado.')) { S.deleteSession(c.s.id); S.restClear(); toast('Sesión descartada'); render(); }
         break;
       case 'back': ui.editId = null; go('history'); break;
 
@@ -2302,7 +2334,7 @@
     toast('Datos actualizados con los de la otra pestaña');
   }
   S.onInactive = showTabWall;
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resumeHere(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resumeHere(); restSync(); } });
   window.addEventListener('focus', resumeHere);
   window.addEventListener('pageshow', (e) => { if (e.persisted) resumeHere(); });
 
