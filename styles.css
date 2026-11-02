@@ -571,8 +571,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .chart-empty { padding: 16px 8px; margin-top: 8px; text-align: center; }
 
 /* ---------- RIR por serie (segunda línea, debajo de las reps) ---------- */
-.set .rir { grid-column: 3; min-height: 30px !important; font-size: .9375rem !important; padding: 2px; text-align: center; font-weight: 500; background: none; }
-.ssinputs .rir { grid-column: 2; min-height: 30px !important; font-size: .9375rem !important; padding: 2px; text-align: center; background: none; }
+.set .rir { grid-column: 3; min-height: 34px !important; font-size: .875rem !important; padding: 2px; text-align: center; font-weight: 500; border-radius: 10px; }
+.ssinputs .rir { grid-column: 2; min-height: 34px !important; font-size: .875rem !important; padding: 2px; text-align: center; border-radius: 10px; }
 
 /* ---------- músculos en el editor ---------- */
 .chip.sec { background: var(--warn-bg); color: var(--warn); box-shadow: none; }
