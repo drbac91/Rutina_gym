@@ -671,10 +671,7 @@
       const exs = s.exercises.map((ex) => {
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
         if (!sets) return '';
-        const best = S.opt('e1rmHist') ? ex.sets.filter((x) => x.done).reduce((m, x) => Math.max(m, S.e1rm(x.weight, x.reps) || 0), 0) : 0;
-        const rirs = S.opt('rir') ? ex.sets.filter((x) => x.done && x.rir != null).map((x) => x.rir) : [];
-        const rirTxt = rirs.length ? `RIR ${Math.min(...rirs) === Math.max(...rirs) ? Math.min(...rirs) : Math.min(...rirs) + '–' + Math.max(...rirs)}` : '';
-        const extra = [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', rirTxt, S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
+        const extra = exMetrics(ex);
         return `<div class="hist-ex"><b>${esc(ex.name)}</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">${extra}</span>` : ''}</div>`;
       }).join('');
       return `
@@ -694,6 +691,14 @@
     }).join('');
   }
 
+  /** 1RM, RIR y RPE de un ejercicio, según las opciones activas. Lo usan Historial y WhatsApp. */
+  function exMetrics(ex) {
+    const best = S.opt('e1rmHist') ? ex.sets.filter((x) => x.done).reduce((m, x) => Math.max(m, S.e1rm(x.weight, x.reps) || 0), 0) : 0;
+    const rirs = S.opt('rir') ? ex.sets.filter((x) => x.done && x.rir != null).map((x) => x.rir) : [];
+    const rirTxt = rirs.length ? `RIR ${Math.min(...rirs) === Math.max(...rirs) ? Math.min(...rirs) : Math.min(...rirs) + '–' + Math.max(...rirs)}` : '';
+    return [best ? `1RM ≈ ${fmt(Math.round(best))} ${unit()}` : '', rirTxt, S.opt('rpe') && ex.rpe != null ? `RPE ${fmt(ex.rpe)}` : ''].filter(Boolean).join(' · ');
+  }
+
   /** Texto corto y legible de las sesiones elegidas (del día más viejo al más nuevo), para WhatsApp. */
   function shareText(ids) {
     const list = S.sessions().filter((x) => ids.has(x.id)).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -702,7 +707,9 @@
       const head = `*${s.dayName || 'Sesión'}* · ${fmtDate(s.date)}${min != null ? ' · ' + min + ' min' : ''}`;
       const lines = s.exercises.map((ex) => {
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
-        return sets ? `• ${ex.name}: ${sets} ${unit()}` : '';
+        if (!sets) return '';
+        const extra = exMetrics(ex);
+        return `• ${ex.name}: ${sets} ${unit()}${extra ? ' · ' + extra : ''}`;
       }).filter(Boolean);
       return [head, ...lines].join('\n');
     }).join('\n\n');
