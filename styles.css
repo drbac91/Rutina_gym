@@ -334,6 +334,17 @@ button.quiet:active { background: none; opacity: .6; }
 .stat b { display: block; font-size: 1.5rem; line-height: 1.15; font-weight: 680; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .stat span { display: block; font-size: .75rem; line-height: 1.25; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
 .stats + .note { margin-top: 16px; }
+/* Resumen de Progreso: tablero de tarjetas de distinto tamaño (bento). */
+.bento { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.tile { min-width: 0; padding: 14px 16px; background: var(--card); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.tile.wide, .bento-sub { grid-column: 1 / -1; }
+.tile b { display: block; font-size: 1.75rem; line-height: 1.1; font-weight: 680; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.tile b.tile-num { font-size: 3rem; line-height: 1; }
+.tile.warn b { color: var(--warn); }
+.tile span { display: block; margin-top: 4px; font-size: .75rem; line-height: 1.25; color: var(--muted); overflow-wrap: anywhere; }
+.tile-bar { height: 6px; margin-top: 12px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.tile-bar i { display: block; height: 100%; background: var(--accent-fill); border-radius: 3px; }
+.bento-sub { margin: 10px 0 0; }
 .up { color: var(--ok); } .down { color: var(--danger); }
 
 /* ---------- editor de rutina ---------- */
@@ -377,6 +388,14 @@ details.exe.dragging .drag-handle { cursor: grabbing; }
 body.gate #tabs, body.gate #sync { display: none; }
 body.gate { padding-bottom: 16px; }
 .login { display: flex; flex-direction: column; min-height: calc(100vh - 40px); min-height: calc(100dvh - 40px); justify-content: flex-end; padding: 0 4px 24px; }
+/* Único gradiente de la app: una bruma del acento detrás del login, lejos de los textos. */
+.login::before {
+  content: ""; position: fixed; inset: 0 0 35% 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 18% 12%, var(--accent-line), transparent 72%),
+    radial-gradient(55% 60% at 88% 26%, var(--accent-soft), transparent 75%),
+    radial-gradient(70% 50% at 48% 62%, var(--accent-soft), transparent 78%);
+}
 .login .logo { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--accent-fill); color: var(--accent-text); font-size: 40px; }
 .login h1 { font-size: 2.75rem; margin: 20px 0 8px; }
 .login p { margin: 0 0 28px; font-size: 1.0625rem; }
@@ -447,10 +466,12 @@ button.info { position: relative; }
   button:active, #tabs button:active { transform: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
+  .login::before { display: none; }
   #tabs, .seg, .sess-bar { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; }
   #sync.error, #sync.offline, #toast { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-contrast: more) {
+  .login::before { display: none; }
   :root { --sep: currentColor; --muted: var(--text); }
   button, input, select, textarea { border: 1.5px solid currentColor; }
   .stepper button, .stepper input { border: 0; }
