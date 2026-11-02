@@ -260,7 +260,9 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
   font-size: .8125rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .sess-bar b { color: var(--text); }
-.sess-track { flex: 1; height: 5px; border-radius: 99px; background: var(--fill); overflow: hidden; }
+.sess-track { flex: 1; min-width: 20px; height: 5px; border-radius: 99px; background: var(--fill); overflow: hidden; }
+.sess-rest { color: var(--accent); font-weight: 600; }
+.sess-rest[hidden] { display: none; }
 .sess-track i { display: block; height: 100%; border-radius: 99px; background: var(--accent-fill); transition: width .4s var(--ease-out); }
 .date-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 2px 10px; }
 .date-row label { margin: 0; font-size: .9063rem; }
