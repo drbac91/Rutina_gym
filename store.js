@@ -40,6 +40,8 @@
   const E1RM_MAX_REPS = 10;
   /** Semanas sin mejorar el 1RM estimado para avisar "estancado" (3–4 es lo habitual). */
   const STALL_WEEKS = 3;
+  /** Sesiones mínimas en esas semanas para avisar: una sola sesión floja no es un estancamiento. */
+  const STALL_MIN_SESSIONS = 2;
   /** Cuánto cuenta una serie para cada músculo SECUNDARIO (el principal cuenta 1). */
   const SECONDARY_MUSCLE_FACTOR = 0.5;
   /** Una serie es "efectiva" si te quedaron como mucho estas repeticiones en reserva (RIR). */
@@ -936,19 +938,35 @@
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
 
-  /** Ejercicios estancados: entrenados en las últimas STALL_WEEKS semanas pero sin superar
-   *  el mejor 1RM estimado de antes. Requiere datos de antes y de después del corte. */
-  function stalls() {
+  /** Estancamiento de un ejercicio: al menos STALL_MIN_SESSIONS sesiones en las últimas STALL_WEEKS
+   *  semanas sin superar el mejor 1RM estimado de antes. Requiere datos de antes y de después del corte.
+   *  Devuelve { before, after, sessions, best } o null; best es la serie de la marca. */
+  function stallOf(key) {
     const cut = daysAgoStr(STALL_WEEKS * 7);
+    const e = e1rmSeries(key);
+    const before = e.filter((x) => x.date < cut), after = e.filter((x) => x.date >= cut);
+    if (!before.length || after.length < STALL_MIN_SESSIONS) return null;
+    const best = before.reduce((a, x) => (x.e1rm > a.e1rm ? x : a));
+    const bAfter = Math.max(...after.map((x) => x.e1rm));
+    return bAfter <= best.e1rm ? { before: best.e1rm, after: bAfter, sessions: after.length, best } : null;
+  }
+
+  /** Lista de ejercicios estancados. */
+  function stalls() {
     const out = [];
     exerciseNames().forEach(({ key, name }) => {
-      const e = e1rmSeries(key);
-      const before = e.filter((x) => x.date < cut), after = e.filter((x) => x.date >= cut);
-      if (!before.length || !after.length) return;
-      const bBefore = Math.max(...before.map((x) => x.e1rm)), bAfter = Math.max(...after.map((x) => x.e1rm));
-      if (bAfter <= bBefore) out.push({ key, name, before: bBefore, after: bAfter, sessions: after.length });
+      const x = stallOf(key);
+      if (x) out.push({ key, name, ...x });
     });
     return out;
+  }
+
+  /** Peso mínimo para superar un 1RM estimado con esas reps, en saltos de `step` desde `base`
+   *  (la barra, si la hay). Ej.: stallGoal(80, 8, 2.5) = 65. */
+  function stallGoal(best, reps, step, base = 0) {
+    let w = Math.max(base, base + Math.ceil((best / (1 + reps / 30) - base) / step) * step);
+    while (!(e1rm(w, reps) > best)) w += step;
+    return w;
   }
 
   /** Lunes (YYYY-MM-DD) de la semana de una fecha. */
@@ -1311,8 +1329,8 @@
     addDay, deleteDay, reinsertDay, moveDay,
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
-    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, stalls, weekStart, weeklyStats, muscleSets, sessionMinutes,
+    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, STALL_MIN_SESSIONS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
+    e1rm, e1rmSeries, records, stalls, stallOf, stallGoal, weekStart, weeklyStats, muscleSets, sessionMinutes,
     mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
