@@ -782,7 +782,7 @@
     if (ui.progSec == null) ui.progSec = S.getPref('progSec');
     if (!PROG_SECS.some(([k]) => k === ui.progSec)) ui.progSec = 'summary';
     const body = {
-      summary: () => cyclesCard() + weekCard() + dayChartCard() + cycleChartCard(),
+      summary: () => bentoCard() + cyclesCard() + weekCard() + dayChartCard() + cycleChartCard(),
       exercise: () => exerciseHtml + stallsCard(),
       muscles: () => muscleCard() || '<p class="empty">Terminá una sesión para ver tus series por músculo.</p>',
       body: () => bodyweightCard(),
@@ -829,15 +829,6 @@
       <div class="card">
         <h2>Por semana</h2>
         ${weeks.length >= 2 ? '<div class="svgchart" data-chart="week"></div>' : '<p class="muted chart-empty">Con una sola semana registrada todavía no hay evolución.</p>'}
-        <p class="muted" style="margin-top:10px">Semana del ${esc(fmtShort(w.week))}:</p>
-        <div class="stats">
-          <div class="stat"><b>${w.sessions}</b><span>Sesiones</span></div>
-          <div class="stat"><b>${w.sets}</b><span>Series hechas</span></div>
-          ${S.opt('rir') ? `<div class="stat"><b>${w.rirN ? w.effective : '–'}</b><span>Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)</span></div>
-          <div class="stat"><b>${w.rirAvg != null ? fmt(w.rirAvg) : '–'}</b><span>RIR promedio</span></div>` : ''}
-          <div class="stat"><b>${w.minutesAvg != null ? w.minutesAvg + ' min' : '–'}</b><span>Duración promedio</span></div>
-          <div class="stat"><b>${shortNum(w.volume)}</b><span>Volumen: peso × reps (${unit()})</span></div>
-        </div>
         ${S.opt('rir') && w.rirN < w.sets ? `<p class="muted">RIR cargado en ${w.rirN} de ${w.sets} series: las exigentes solo cuentan las que tienen RIR.</p>` : ''}
       </div>`;
   }
@@ -926,6 +917,32 @@
 
   /* ---------- ciclos y gráficos generales ---------- */
 
+  /** Tablero del Resumen: las cifras del ciclo y de la última semana, en tarjetas de distinto tamaño. */
+  function bentoCard() {
+    const c = S.cycles();
+    const weeks = S.weeklyStats();
+    const w = weeks[weeks.length - 1];
+    const tile = (value, label, cls = '') => `<div class="tile ${cls}"><b>${value}</b><span>${label}</span></div>`;
+    const pct = c.total ? Math.round((c.current / c.total) * 100) : 0;
+    return `
+      <div class="bento">
+        <div class="tile wide">
+          <b class="tile-num">${c.current}/${c.total}</b><span>Ciclo en curso</span>
+          <div class="tile-bar"><i style="width:${pct}%"></i></div>
+        </div>
+        ${tile(c.complete, 'Ciclos completos')}
+        ${tile(c.incomplete, 'Ciclos incompletos', c.incomplete ? 'warn' : '')}
+        ${w ? `
+        <h2 class="bento-sub">Semana del ${esc(fmtShort(w.week))}</h2>
+        ${tile(shortNum(w.volume), `Volumen: peso × reps (${unit()})`, 'wide')}
+        ${tile(w.sessions, 'Sesiones')}
+        ${tile(w.sets, 'Series hechas')}
+        ${S.opt('rir') ? tile(w.rirN ? w.effective : '–', `Exigentes (te quedaban ${S.EFFECTIVE_RIR_MAX} o menos)`)
+          + tile(w.rirAvg != null ? fmt(w.rirAvg) : '–', 'RIR promedio') : ''}
+        ${tile(w.minutesAvg != null ? w.minutesAvg + ' min' : '–', 'Duración promedio', 'wide')}` : ''}
+      </div>`;
+  }
+
   /** Resumen de ciclos: un ciclo = hiciste todos los días de la rutina actual. */
   function cyclesCard() {
     const c = S.cycles();
@@ -949,11 +966,6 @@
     return `
       <div class="card">
         <h2>Ciclos</h2>
-        <div class="stats">
-          <div class="stat"><b>${c.complete}</b><span>Completos</span></div>
-          <div class="stat"><b class="${c.incomplete ? 'warn-txt' : ''}">${c.incomplete}</b><span>Incompletos</span></div>
-          <div class="stat"><b>${c.current}/${c.total}</b><span>En curso</span></div>
-        </div>
         ${missing}${behindTxt}${perDay}
         <p class="muted">Un ciclo es una vuelta por todos los días de tu rutina${c.total ? ` (${c.total})` : ''}, en cualquier orden. Si repetís un día antes de hacerlos todos, ese ciclo se cierra como incompleto.</p>
       </div>`;
