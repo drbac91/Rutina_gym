@@ -251,7 +251,7 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
 
 /* ---------- entrenar: sesión ---------- */
 .sess-bar {                 /* cuánto falta, siempre a la vista */
-  position: sticky; top: calc(8px + env(safe-area-inset-top)); z-index: 5;
+  position: sticky; top: calc(24px + env(safe-area-inset-top)); z-index: 5;
   display: flex; align-items: center; gap: 12px;
   margin: 0 0 12px; padding: 9px 30px 9px 15px; border-radius: 99px;
   background: var(--material);
@@ -571,8 +571,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .6; }
 .chart-empty { padding: 16px 8px; margin-top: 8px; text-align: center; }
 
 /* ---------- RIR por serie (segunda línea, debajo de las reps) ---------- */
-.set .rir { grid-column: 3; min-height: 34px !important; font-size: .875rem !important; padding: 2px; text-align: center; font-weight: 500; border-radius: 10px; }
-.ssinputs .rir { grid-column: 2; min-height: 34px !important; font-size: .875rem !important; padding: 2px; text-align: center; border-radius: 10px; }
+.set .rir { grid-column: 3; min-height: 34px !important; font-size: 1rem !important; padding: 2px; text-align: center; font-weight: 500; border-radius: 10px; }
+.ssinputs .rir { grid-column: 2; min-height: 34px !important; font-size: 1rem !important; padding: 2px; text-align: center; border-radius: 10px; }
 
 /* ---------- músculos en el editor ---------- */
 .chip.sec { background: var(--warn-bg); color: var(--warn); box-shadow: none; }
