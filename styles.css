@@ -305,6 +305,9 @@ label { display: block; font-size: .8125rem; color: var(--muted); margin: 12px 0
 @keyframes pop { from { transform: scale(.8); } to { transform: scale(1); } }
 .set.done input, .set.done .stepper { opacity: .58; }
 .set.done .stepper input { opacity: 1; }
+/* el drop set (2.ª línea) queda fuera de .set: se sombrea igual al completar la serie */
+.setw:has(.set.done) .dropline input, .setw:has(.set.done) .dropline .stepper { opacity: .58; }
+.setw:has(.set.done) .dropline .stepper input { opacity: 1; }
 .x svg { width: 15px; height: 15px; }
 .set .x { justify-self: end; padding: 0; min-width: 30px; width: 30px; min-height: 44px; background: none; color: var(--muted); opacity: .6; display: inline-flex; align-items: center; justify-content: center; }
 .set-head { color: var(--muted); font-size: .6875rem; font-weight: 600; text-align: center; margin-bottom: 6px; letter-spacing: .02em; }
@@ -650,7 +653,7 @@ button.pal[aria-checked="true"] { color: var(--text); font-weight: 650; }
 /* RPE por ejercicio */
 .rpe-row { margin-top: 8px; }
 .rpe-row label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .875rem; color: var(--muted); }
-.rpe-row select { width: auto; min-width: 72px; min-height: 40px; }
+.rpe-row select { width: auto; min-width: 96px; min-height: 40px; padding-inline: 12px 28px; text-overflow: clip; }
 .hist-extra { display: block; }
 
 /* línea de músculos del editor de Rutina */

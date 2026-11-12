@@ -2334,6 +2334,8 @@
     toast('Datos actualizados con los de la otra pestaña');
   }
   S.onInactive = showTabWall;
+  // iOS ignora user-scalable=no: se frena el pellizco a mano.
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resumeHere(); restSync(); } });
   window.addEventListener('focus', resumeHere);
   window.addEventListener('pageshow', (e) => { if (e.persisted) resumeHere(); });
