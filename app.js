@@ -2229,17 +2229,21 @@
       const id = el.closest('[data-id]').dataset.id, key = S.normName(el.value);
       const dup = S.state.routine.days.find((d) => d.exercises.some((x) => x.id !== id && S.normName(x.name) === key));
       const day = S.find(S.state.routine.days, el.closest('[data-day]').dataset.day), ex = S.find(day.exercises, id), box = el.closest('[data-id]');
-      if (!ex.muscles) {                           // sin músculos: se propone lo de la base (nunca pisa lo cargado)
-        const sug = S.suggestMuscles(ex.name);
+      // Sin músculos, o con otro nombre que al abrir el campo: se propone lo de la base. "Deshacer" devuelve lo anterior.
+      const renamed = S.normName(el.defaultValue) !== key;
+      if (!ex.muscles || renamed) {
+        const sug = S.suggestMuscles(ex.name), prev = ex.muscles;
         if (sug) {
           ex.muscles = { primary: sug.primary, secondary: sug.secondary };
           S.commit();
           box.querySelector('[data-mbox]').innerHTML = muscleBox(ex);
-          if (!dup) toast('Músculos sugeridos: ' + muscleText(ex), { label: 'Quitar', fn: () => {
-            delete ex.muscles; S.commit(); box.querySelector('[data-mbox]').innerHTML = muscleBox(ex);
+          if (!dup) toast('Músculos sugeridos: ' + muscleText(ex), { label: prev ? 'Deshacer' : 'Quitar', fn: () => {
+            if (prev) ex.muscles = prev; else delete ex.muscles;
+            S.commit(); box.querySelector('[data-mbox]').innerHTML = muscleBox(ex);
           } });
         }
       }
+      el.defaultValue = el.value;
       if (dup) toast(`Ya existe "${el.value.trim()}" en ${dup.name}: van a compartir historial y pesos`);
       return;
     }
