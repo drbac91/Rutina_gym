@@ -930,7 +930,13 @@
     // Cada sesión se mide con los días de SU rutina (la activa o una de "Mis rutinas"). Sin rutina
     // anotada: la de `legacy` (la que estaba activa al primer cambio) o, si nunca se cambió, la actual.
     const byId = new Map([[r.id || '', r], ...(r.saved || []).map((x) => [x.id, x])]);
-    const routineOf = (s) => (byId.has(s.routineId || r.legacy || r.id || '') ? byId.get(s.routineId || r.legacy || r.id || '') : null);
+    // Importada con gym-v52 y nunca cambiada después: lo de antes de importar es de la copia local.
+    const loc = !r.id && !r.legacy && myRoutineBackup();
+    const routineOf = (s) => {
+      if (loc && !s.routineId && s.created < loc.at) return loc.routine;
+      const k = s.routineId || r.legacy || r.id || '';
+      return byId.has(k) ? byId.get(k) : null;
+    };
     const keyOf = (s, days) => { const d = days.find((x) => isDay(s, x)); return d ? d.id : 'x:' + (normName(s.dayName) || s.dayId); };
     let acc = new Set(), tramo = [], R;
     const close = (changed) => {
@@ -1412,15 +1418,18 @@
   function swapIn(next, fromId) {
     const cur = state.routine;
     const saved = (cur.saved || []).filter((x) => x.id !== fromId);
-    const curId = cur.id || uid();
-    const legacy = cur.legacy || (cur.id ? null : curId);   // primer cambio: las sesiones viejas son de la actual
+    const curId = cur.id || uid(), nextId = next.id || uid();
+    // Copia local de gym-v52 = la rutina de ANTES de la última importación: dueña de las sesiones viejas.
+    const loc = myRoutineBackup();
+    const locId = fromId === 'local' ? nextId : uid();
+    // Primer cambio: las sesiones sin rutina anotada son de la de antes de importar (si hay copia local) o de la actual.
+    const legacy = cur.legacy || (cur.id ? null : loc ? locId : curId);
     if (cur.days.some((d) => d.exercises.length)) saved.unshift({ id: curId, savedAt: Date.now(), days: cur.days });
-    const loc = myRoutineBackup();                          // la copia local vieja también entra a la lista
     if (loc) {
-      saved.push({ id: uid(), savedAt: Number(loc.at) || 0, days: normDays(loc.routine.days) });
+      if (fromId !== 'local') saved.push({ id: locId, savedAt: Number(loc.at) || 0, days: normDays(loc.routine.days) });
       try { localStorage.removeItem(ROUTINE_BACKUP_KEY); } catch (e) { /* nada */ }
     }
-    const out = { days: next.days, id: next.id || uid() };   // mismo orden que normRoutine
+    const out = { days: next.days, id: nextId };   // mismo orden que normRoutine
     withOptional(out, 'legacy', legacy);
     state.routine = withOptional(out, 'saved', saved.length ? saved : null);
   }
@@ -1438,7 +1447,6 @@
     const x = savedRoutines().find((r) => r.id === id);
     if (!x) return false;
     backup('rutina');
-    if (x.local) { try { localStorage.removeItem(ROUTINE_BACKUP_KEY); } catch (e) { /* nada */ } }
     swapIn({ days: normDays(x.days), id: x.local ? null : x.id }, x.id);
     commit();
     return true;
