@@ -195,6 +195,7 @@
       date: isDateStr(s.date) ? s.date : todayStr(),
       dayId: String(s.dayId || ''),
       dayName: String(s.dayName || ''),
+      ...(s.routineId ? { routineId: String(s.routineId) } : {}),   // rutina con la que se hizo (opcional)
       finished: s.finished !== false,
       exercises: (Array.isArray(s.exercises) ? s.exercises : []).map((ex) => {
         const t = (ex && ex.target) || {};
@@ -270,6 +271,23 @@
   const normUnit = (u) => (u === 'lb' ? 'lb' : 'kg');
 
   /** Valida y limpia un objeto con formato rutina.json. Lanza Error en español. */
+  const normDays = (days) => days.map((day, i) => ({
+    id: String((day && day.id) || uid()),
+    name: String((day && day.name) || 'Día ' + (i + 1)),
+    exercises: ((day && Array.isArray(day.exercises)) ? day.exercises : []).map(normExercise),
+  }));
+
+  /** Rutina activa y, opcionales (solo desde el primer cambio de rutina): su id, `legacy` = la rutina
+   *  de las sesiones viejas sin rutina anotada, y `saved` = "Mis rutinas" (las anteriores, nunca se pierden). */
+  function normRoutine(r) {
+    const out = { days: normDays(r.days) };
+    withOptional(out, 'id', r.id ? String(r.id) : null);
+    withOptional(out, 'legacy', r.legacy ? String(r.legacy) : null);
+    const saved = (Array.isArray(r.saved) ? r.saved : []).filter((x) => x && Array.isArray(x.days))
+      .map((x) => ({ id: String(x.id || uid()), savedAt: Number(x.savedAt) || 0, days: normDays(x.days) }));
+    return withOptional(out, 'saved', saved.length ? saved : null);
+  }
+
   function normalize(d) {
     if (!d || typeof d !== 'object') throw new Error('El archivo no es un JSON de rutina válido.');
     const days = d.routine && d.routine.days;
@@ -285,13 +303,7 @@
       exerciseAliases: normAliases(d.exerciseAliases),
       // Registro de peso corporal [{ date, kg }]: cada valor rige hasta el siguiente. Fuera de routine.
       bodyweights: normBodyweights(d.bodyweights),
-      routine: {
-        days: days.map((day, i) => ({
-          id: String((day && day.id) || uid()),
-          name: String((day && day.name) || 'Día ' + (i + 1)),
-          exercises: ((day && Array.isArray(day.exercises)) ? day.exercises : []).map(normExercise),
-        })),
-      },
+      routine: normRoutine(d.routine),
       sessions: (Array.isArray(d.sessions) ? d.sessions : []).map(normSession),
     };
   }
@@ -730,7 +742,9 @@
     const runs = groupRuns(day.exercises);
     const session = {
       id: uid(), created: Date.now(), date: todayStr(),
-      dayId: day.id, dayName: day.name, finished: false,
+      dayId: day.id, dayName: day.name,
+      ...(state.routine.id ? { routineId: state.routine.id } : {}),   // mismo orden que normSession
+      finished: false,
       exercises: day.exercises.map((ex, idx) => {
         const last = lastEntry(ex.name, null, day.id);
         // Superserie: los ejercicios de la racha comparten número de series (el mayor) y no usan drop.
@@ -906,33 +920,52 @@
    *  límites de los ciclos viejos no cambian (solo qué días figuran como faltantes).
    *  El volumen del ciclo suma todas sus sesiones. */
   function cycles() {
-    const days = state.routine.days.filter((d) => d.exercises.length);   // un día vacío no se puede "hacer"
-    const total = days.length;
+    const r = state.routine;
+    const daysOf = (R) => (R ? R.days.filter((d) => d.exercises.length) : []);   // un día vacío no se puede "hacer"
+    const curDays = daysOf(r);
+    const total = curDays.length;
     const list = [];
     if (!total) return { complete: 0, incomplete: 0, current: 0, total: 0, list, missing: [], since: null };
-    const keyOf = (s) => { const d = days.find((x) => isDay(s, x)); return d ? d.id : 'x:' + (normName(s.dayName) || s.dayId); };
-    let acc = new Set(), tramo = [];
-    const close = () => {
+    // Cada sesión se mide con los días de SU rutina (la activa o una de "Mis rutinas"). Sin rutina
+    // anotada: la de `legacy` (la que estaba activa al primer cambio) o, si nunca se cambió, la actual.
+    const byId = new Map([[r.id || '', r], ...(r.saved || []).map((x) => [x.id, x])]);
+    // Importada con gym-v52 y nunca cambiada después: lo de antes de importar es de la copia local.
+    const loc = !r.id && !r.legacy && myRoutineBackup();
+    const routineOf = (s) => {
+      if (loc && !s.routineId && s.created < loc.at) return loc.routine;
+      const k = s.routineId || r.legacy || r.id || '';
+      return byId.has(k) ? byId.get(k) : null;
+    };
+    const keyOf = (s, days) => { const d = days.find((x) => isDay(s, x)); return d ? d.id : 'x:' + (normName(s.dayName) || s.dayId); };
+    let acc = new Set(), tramo = [], R;
+    const close = (changed) => {
+      const days = daysOf(R);
       const volume = round2(tramo.reduce((a, x) => a + sessionVolume(x), 0));
-      // Ninguna sesión es de un día de la rutina actual: es de una rutina anterior (no se le "piden" días nuevos).
-      const old = !days.some((d) => acc.has(d.id));
-      const missing = old ? [] : days.filter((d) => !acc.has(d.id)).map((d) => d.name);
+      // De otra rutina, o ninguna sesión es de un día de la rutina (rutina vieja, sin datos): no se le "piden" días.
+      const old = R !== r || !days.some((d) => acc.has(d.id));
+      const unknown = !R || !days.some((d) => acc.has(d.id));
+      const missing = unknown ? [] : days.filter((d) => !acc.has(d.id)).map((d) => d.name);
       list.push({ n: list.length + 1, start: tramo[0].date, end: tramo[tramo.length - 1].date, sessions: tramo.length,
-                  volume, avg: round2(volume / tramo.length), complete: !missing.length, missing, old });
+                  volume, avg: round2(volume / tramo.length), complete: !changed && !missing.length, missing, old, changed, unknown });
       acc = new Set(); tramo = [];
     };
     sortedSessions().forEach((s) => {
       if (!s.finished) return;
-      const k = keyOf(s);
-      if (acc.has(k)) close();                             // se repitió un día: el ciclo anterior queda incompleto
+      const Rs = routineOf(s);
+      if (tramo.length && Rs !== R) close(true);           // cambio de rutina: el ciclo se corta, no es incompleto
+      R = Rs;
+      const days = daysOf(R), k = keyOf(s, days);
+      if (acc.has(k)) close(false);                        // se repitió un día: el ciclo anterior queda incompleto
       acc.add(k); tramo.push(s);
-      if (days.every((d) => acc.has(d.id))) close();       // ya estuvieron todos: completo
+      if (days.length && days.every((d) => acc.has(d.id))) close(false);   // ya estuvieron todos: completo
     });
+    const mine = R === r && tramo.length;                  // el ciclo en curso es de la rutina activa
     return {
-      complete: list.filter((c) => c.complete && !c.old).length, incomplete: list.filter((c) => !c.complete).length,
-      current: days.filter((d) => acc.has(d.id)).length, total, list,
-      missing: tramo.length ? days.filter((d) => !acc.has(d.id)).map((d) => d.name) : [],   // lo que falta del ciclo en curso
-      since: tramo.length ? tramo[0].date : null,
+      complete: list.filter((c) => c.complete && !c.unknown).length,   // de cualquier rutina conocida
+       incomplete: list.filter((c) => !c.complete && !c.changed).length,
+      current: mine ? curDays.filter((d) => acc.has(d.id)).length : 0, total, list,
+      missing: mine ? curDays.filter((d) => !acc.has(d.id)).map((d) => d.name) : [],   // lo que falta del ciclo en curso
+      since: mine ? tramo[0].date : null,
     };
   }
 
@@ -1054,7 +1087,7 @@
   /** Músculos de cada ejercicio según la rutina ACTUAL (por nombre normalizado). */
   function muscleMap() {
     const m = new Map();
-    state.routine.days.forEach((d) => d.exercises.forEach((e) => {
+    [state.routine, ...(state.routine.saved || [])].flatMap((r) => r.days).forEach((d) => d.exercises.forEach((e) => {
       const k = exKey(e.name);
       if (e.muscles && !m.has(k)) m.set(k, e.muscles);
     }));
@@ -1228,7 +1261,9 @@
   /** Vuelve a la rutina de ejemplo conservando el historial. */
   async function resetRoutine() {
     const seed = normalize(await loadSeed());
-    replaceAll(Object.assign({}, state, { routine: seed.routine }), 'reset-routine');
+    backup('reset-routine');
+    swapIn({ days: seed.routine.days });
+    commit();
   }
 
   /* ---------- usados por cloud.js (datos que llegan de la nube) ---------- */
@@ -1319,40 +1354,68 @@
     return normalize({ routine: { days: withIds } }).routine;
   }
 
-  /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer (y una copia automática). */
+  /** Reemplaza solo la rutina. La anterior queda en "Mis rutinas" (y en una copia automática). */
   function replaceRoutine(routine) {
     backup('rutina');
-    try {
-      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), owner: localOwner(), routine: state.routine }));
-    } catch (e) { /* nada */ }
-    state.routine = routine;
+    swapIn(routine);
     commit();                                  // dispara la subida a la nube
   }
 
   const localOwner = () => { try { return localStorage.getItem(OWNER_KEY) || ''; } catch (e) { return ''; } };
-  /** La copia de rutina, solo si es de la cuenta actual (en un teléfono compartido, la de otro no se ofrece). */
+  /** Copia de "Deshacer" de versiones anteriores (solo en este teléfono y de la cuenta actual). */
   const myRoutineBackup = () => {
     try {
       const b = JSON.parse(localStorage.getItem(ROUTINE_BACKUP_KEY));
-      return b && (b.owner || '') === localOwner() ? b : null;
+      return b && (b.owner || '') === localOwner() && b.routine && Array.isArray(b.routine.days) ? b : null;
     } catch (e) { return null; }
   };
-  /** Cantidad de días de la rutina guardada para deshacer (0 = no hay). */
-  const hasRoutineBackup = () => { const b = myRoutineBackup(); return b && b.routine && Array.isArray(b.routine.days) ? b.routine.days.length : 0; };
 
-  /** Vuelve a la rutina anterior a la última importación. Intercambia: la de ahora queda guardada,
-   *  así deshacer nunca pierde una rutina. Devuelve true si pudo. */
-  function restoreRoutineBackup() {
-    try {
-      const b = myRoutineBackup();
-      if (!b) return false;
-      const next = normalize({ routine: b.routine }).routine;
-      backup('rutina');
-      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), owner: localOwner(), routine: state.routine }));
-      state.routine = next;
-      commit();
-      return true;
-    } catch (e) { return false; }
+  /** Pone `next` ({ days, id? }) como rutina activa. La actual pasa a "Mis rutinas" con su id, así sus
+   *  sesiones siguen midiéndose con sus días. `fromId`: la guardada que se está usando (sale de la lista). */
+  function swapIn(next, fromId) {
+    const cur = state.routine;
+    const saved = (cur.saved || []).filter((x) => x.id !== fromId);
+    const curId = cur.id || uid(), nextId = next.id || uid();
+    // Copia local de gym-v52 = la rutina de ANTES de la última importación: dueña de las sesiones viejas.
+    const loc = myRoutineBackup();
+    const locId = fromId === 'local' ? nextId : uid();
+    // Primer cambio: las sesiones sin rutina anotada son de la de antes de importar (si hay copia local) o de la actual.
+    const legacy = cur.legacy || (cur.id ? null : loc ? locId : curId);
+    if (cur.days.some((d) => d.exercises.length)) saved.unshift({ id: curId, savedAt: Date.now(), days: cur.days });
+    if (loc) {
+      if (fromId !== 'local') saved.push({ id: locId, savedAt: Number(loc.at) || 0, days: normDays(loc.routine.days) });
+      try { localStorage.removeItem(ROUTINE_BACKUP_KEY); } catch (e) { /* nada */ }
+    }
+    const out = { days: next.days, id: nextId };   // mismo orden que normRoutine
+    withOptional(out, 'legacy', legacy);
+    state.routine = withOptional(out, 'saved', saved.length ? saved : null);
+  }
+
+  /** "Mis rutinas": las guardadas (sincronizadas) y, si queda, la copia local de versiones anteriores. */
+  function savedRoutines() {
+    const list = (state.routine.saved || []).slice();
+    const loc = myRoutineBackup();
+    if (loc) list.push({ id: 'local', savedAt: Number(loc.at) || 0, days: loc.routine.days, local: true });
+    return list;
+  }
+
+  /** Usa una rutina guardada; la actual queda guardada. Devuelve true si pudo. */
+  function useSavedRoutine(id) {
+    const x = savedRoutines().find((r) => r.id === id);
+    if (!x) return false;
+    backup('rutina');
+    swapIn({ days: normDays(x.days), id: x.local ? null : x.id }, x.id);
+    commit();
+    return true;
+  }
+
+  /** Borra una rutina guardada (antes, copia automática). */
+  function deleteSavedRoutine(id) {
+    backup('borrar rutina');
+    if (id === 'local') { try { localStorage.removeItem(ROUTINE_BACKUP_KEY); } catch (e) { /* nada */ } }
+    const saved = (state.routine.saved || []).filter((x) => x.id !== id);
+    if (saved.length) state.routine.saved = saved; else delete state.routine.saved;
+    commit();
   }
 
   /** CSV (separador ";" y coma decimal para abrir bien en Excel es-AR). */
@@ -1395,7 +1458,7 @@
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp, restStart, restClear, restGet,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
-    swapExercise, parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
+    swapExercise, parseRoutineImport, replaceRoutine, savedRoutines, useSavedRoutine, deleteSavedRoutine,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */
     canonSession: (x) => { const { updatedAt, ...rest } = normSession(x); return rest; },
     canonRoutine: (r) => normalize({ routine: r }).routine,

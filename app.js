@@ -1097,7 +1097,7 @@
         <h2>Volumen por ciclo</h2>
         ${list.length ? '<div class="svgchart" data-chart="cycle"></div>'
           : '<p class="muted chart-empty">Todavía no se cerró ningún ciclo. Se cierra al hacer todos los días de tu rutina, o al repetir uno antes de terminarlos (incompleto).</p>'}
-        ${list.some((c) => !c.complete) ? '<p class="muted"><span class="warn-txt">■</span> Barra naranja = ciclo incompleto (faltó algún día). Debajo de cada ciclo, cuántas sesiones tuvo.</p>' : ''}
+        ${list.some((c) => !c.complete && !c.changed) ? '<p class="muted"><span class="warn-txt">■</span> Barra naranja = ciclo incompleto (faltó algún día). Debajo de cada ciclo, cuántas sesiones tuvo.</p>' : ''}
       </div>`;
   }
 
@@ -1181,10 +1181,10 @@
         const list = S.cycles().list;
         el.innerHTML = svgChart({
           width, labels: list.map((c) => 'C' + c.n), bars: list.map((c) => c.volume), line: list.map((c) => c.avg),
-          sub: list.map((c) => c.sessions + ' ses.'), barCls: list.map((c) => (c.complete ? '' : 'inc')),
+          sub: list.map((c) => c.sessions + ' ses.'), barCls: list.map((c) => (c.complete || c.changed ? '' : 'inc')),
           barName: 'Volumen del ciclo', lineName: 'Promedio por sesión',
           titles: list.map((c) => `Ciclo ${c.n} (${fmtShort(c.start)}–${fmtShort(c.end)}): ${fmt(c.volume)} ${unit()} en ${c.sessions} sesiones · promedio ${fmt(c.avg)} ${unit()}`
-            + (c.old ? ' · de una rutina anterior' : c.complete ? '' : ` · incompleto, faltó: ${c.missing.join(', ')}`)),
+            + (c.changed ? ' · cortado por cambio de rutina' : c.complete ? (c.old ? ' · de una rutina anterior' : '') : ` · incompleto, faltó: ${c.missing.join(', ')}`)),
         });
       }
     });
@@ -1488,25 +1488,45 @@
       </div>
       <div class="card stack">
         <h2>Cambiar la rutina</h2>
-        <p class="muted">Reemplaza solo los días y ejercicios. <b>Tu historial no se toca.</b> Antes de aplicar te muestra un resumen y se guarda la rutina anterior para poder deshacer.</p>
+        <p class="muted">Reemplaza solo los días y ejercicios. <b>Tu historial no se toca.</b> Antes de aplicar te muestra un resumen. La rutina anterior queda en "Mis rutinas", abajo.</p>
         <button class="primary block" data-act="import-routine-file">Importar rutina (archivo JSON)</button>
         <input type="file" id="file-routine" accept="application/json,.json" hidden>
         <button class="block" data-act="toggle-paste">${ui.pasteOpen ? 'Cancelar' : 'Importar rutina pegando texto'}</button>
         ${ui.pasteOpen ? `
           <textarea id="paste-json" rows="8" placeholder='Pegá acá el JSON de la rutina' spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
           <button class="primary block" data-act="apply-paste">Aplicar rutina pegada</button>` : ''}
-        ${S.hasRoutineBackup() ? `<button class="block" data-act="undo-routine">Volver a la rutina anterior (${S.hasRoutineBackup()} día(s))</button>` : ''}
       </div>
+      ${savedRoutinesCard()}
       <div class="card stack">
         <h2>Rutina de ejemplo</h2>
-        <p class="muted">Reemplaza tu rutina por la de ejemplo. No toca el historial y lo de antes queda como copia automática.</p>
+        <p class="muted">Reemplaza tu rutina por la de ejemplo. No toca el historial y la de ahora queda en "Mis rutinas".</p>
         <button class="block danger" data-act="reset-routine">Volver a la rutina de ejemplo</button>
+      </div>`;
+  }
+
+  /** "3 días: Día 1, Día 2, Día 3" */
+  const routineLabel = (r) => { const d = r.days.filter((x) => x.exercises.length); return `${d.length} día(s): ${d.map((x) => x.name).join(', ')} · ${d.reduce((n, x) => n + x.exercises.length, 0)} ejercicios`; };
+  const savedWhen = (r) => (r.savedAt ? 'guardada el ' + new Date(r.savedAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : 'guardada antes');
+
+  /** "Mis rutinas": las que se usaron antes. Cambiar entre ellas no borra ninguna ni toca el historial. */
+  function savedRoutinesCard() {
+    const list = S.savedRoutines();
+    if (!list.length) return '';
+    return `
+      <div class="card stack">
+        <h2>Mis rutinas</h2>
+        <p class="muted">Ahora usás: <b>${esc(routineLabel(S.state.routine))}</b>. Al cambiar de rutina, la de ahora queda guardada acá. Cada sesión se cuenta en los ciclos de la rutina con la que la hiciste.</p>
+        ${list.map((r) => `
+          <div class="stack">
+            <p><b>${esc(routineLabel(r))}</b><br><small class="muted">${esc(savedWhen(r))}</small></p>
+            <div class="row"><button class="primary" data-act="use-routine" data-id="${esc(r.id)}">Usar esta</button><button class="danger" data-act="del-routine" data-id="${esc(r.id)}">Borrar</button></div>
+          </div>`).join('')}
       </div>`;
   }
 
   const BACKUP_WHY = {
     import: 'antes de restaurar un backup', rutina: 'antes de cambiar la rutina', 'reset-routine': 'antes de volver a la rutina de ejemplo',
-    cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
+    'borrar rutina': 'antes de borrar una rutina guardada', cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
     'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio', músculos: 'antes de revisar "Espalda" en la rutina',
   };
   /** "copia del 20 oct, 21:40" (las copias de versiones viejas no tienen fecha). */
@@ -1532,7 +1552,7 @@
       const routine = S.parseRoutineImport(text);
       const nEx = routine.days.reduce((n, d) => n + d.exercises.length, 0);
       const resumen = routine.days.map((d) => `• ${d.name}: ${d.exercises.length} ejercicios${d.exercises.length ? '' : '  ⚠ vacío'}`).join('\n');
-      if (!confirm(`Vas a REEMPLAZAR tu rutina actual por esta:\n\n${resumen}\n\nTotal: ${nEx} ejercicios.\nTu historial NO se modifica y podés deshacer desde Datos.\n\n¿Continuar?`)) return;
+      if (!confirm(`Vas a REEMPLAZAR tu rutina actual por esta:\n\n${resumen}\n\nTotal: ${nEx} ejercicios.\nTu historial NO se modifica y la de ahora queda en Datos → Mis rutinas.\n\n¿Continuar?`)) return;
       S.replaceRoutine(routine);
       ui.pasteOpen = false;
       toast('Rutina actualizada ✓ — revisá las notas marcadas');
@@ -2117,13 +2137,22 @@
       case 'import-routine-file': document.getElementById('file-routine').click(); break;
       case 'toggle-paste': ui.pasteOpen = !ui.pasteOpen; render(); break;
       case 'apply-paste': applyRoutineText(document.getElementById('paste-json').value); break;
-      case 'undo-routine':
-        if (confirm(`¿Cambiar a la rutina anterior (${S.hasRoutineBackup()} día(s))?\n\nLa de ahora queda guardada: podés volver a ella con el mismo botón. El historial no se modifica.`)) {
-          if (S.restoreRoutineBackup()) { toast('Rutina cambiada ✓ — la otra quedó guardada en Datos'); go('routine'); } else alert('No hay rutina anterior guardada.');
+      case 'use-routine': {
+        const r = S.savedRoutines().find((x) => x.id === btn.dataset.id);
+        if (r && confirm(`¿Usar esta rutina?\n\n${routineLabel(r)}\n\nLa de ahora queda guardada en "Mis rutinas". El historial no se modifica.`)) {
+          if (S.useSavedRoutine(r.id)) { toast('Rutina cambiada ✓ — la otra quedó en Mis rutinas'); go('routine'); }
         }
         break;
+      }
+      case 'del-routine': {
+        const r = S.savedRoutines().find((x) => x.id === btn.dataset.id);
+        if (r && confirm(`¿Borrar esta rutina guardada?\n\n${routineLabel(r)}\n\nEl historial no se modifica. Queda una copia automática en Datos.`)) {
+          S.deleteSavedRoutine(r.id); toast('Rutina borrada'); render();
+        }
+        break;
+      }
       case 'reset-routine':
-        if (confirm('¿Reemplazar tu rutina actual por la de ejemplo? El historial se conserva y lo de antes queda como copia automática en Datos.')) {
+        if (confirm('¿Reemplazar tu rutina actual por la de ejemplo? El historial se conserva y la de ahora queda en Datos → Mis rutinas.')) {
           try { await S.resetRoutine(); toast('Rutina de ejemplo cargada'); render(); } catch (err) { alert(err.message); }
         }
         break;
