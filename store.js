@@ -215,6 +215,9 @@
           },
           sets: (ex && Array.isArray(ex.sets) ? ex.sets : []).map(normSet),
         };
+        // cambiado en la sesión por otro (opcional): nombre original y músculos del nuevo si no está en la rutina
+        withOptional(o, 'swappedFrom', ex && ex.swappedFrom ? String(ex.swappedFrom).slice(0, 200) : null);
+        withOptional(o, 'muscles', ex ? normMuscles(ex.muscles) : null);
         // esfuerzo del ejercicio, de 1 a 10 en pasos de 0,5 (opcional: solo se guarda con valor)
         return withOptional(o, 'rpe', Number.isFinite(rpe) && rpe >= 1 && rpe <= 10 ? Math.round(rpe * 2) / 2 : null);
       }),
@@ -682,6 +685,44 @@
     return m ? Number(m[0]) : null;
   };
 
+  /** Series de un ejercicio al empezar: con lo de la última vez (`last`) o, si no hay, lo de la rutina.
+   *  ex: { usesBar, usesBricks, reps, targetWeight }. */
+  function buildSets(ex, last, nSets, drop) {
+    const lastBar = ex.usesBar && last && last.bar != null ? last.bar : null;
+    const sets = [];
+    for (let i = 0; i < nSets; i++) {
+      const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
+      const set = {
+        weight: src ? src.weight : ex.targetWeight,
+        side: null,
+        bricks: null,                    // mismo orden de campos que normSet (ver huella de sincronización)
+        reps: src ? src.reps : firstInt(ex.reps),
+        drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
+        note: '', done: false,
+      };
+      if (ex.usesBar) {
+        // Con barra se recuerdan los DISCOS por lado. La barra arranca con la última usada
+        // en este ejercicio (se cambia al entrenar); sin barra conocida, el total queda pendiente.
+        set.side = src ? sideOf(src, lastBar) : null;
+        set.weight = set.side != null ? barTotal(lastBar, set.side) : (src ? null : ex.targetWeight);
+        if (set.drop) {
+          set.drop.side = sideOf(set.drop, lastBar);
+          if (set.drop.side != null) set.drop.weight = barTotal(lastBar, set.drop.side);
+        }
+      } else if (ex.usesBricks) {
+        // Máquina con bloques: se recuerdan los LADRILLOS de la última sesión; total = bloques × 5.
+        set.bricks = src ? bricksOf(src) : (ex.targetWeight != null ? round2(ex.targetWeight / BRICK_KG) : null);
+        set.weight = bricksTotal(set.bricks);
+        if (set.drop) {
+          set.drop.bricks = bricksOf(set.drop);
+          if (set.drop.bricks != null) set.drop.weight = bricksTotal(set.drop.bricks);
+        }
+      }
+      sets.push(set);
+    }
+    return sets;
+  }
+
   /** Crea una sesión en curso para el día, prellenando con la última sesión. */
   function startSession(dayId) {
     const day = find(state.routine.days, dayId);
@@ -692,43 +733,13 @@
       dayId: day.id, dayName: day.name, finished: false,
       exercises: day.exercises.map((ex, idx) => {
         const last = lastEntry(ex.name, null, day.id);
-        const sets = [];
         // Superserie: los ejercicios de la racha comparten número de series (el mayor) y no usan drop.
         const run = runs.find((r) => r.includes(idx));
         const group = run.length > 1 ? ex.group : '';
         const nSets = run.length > 1 ? Math.max(...run.map((k) => day.exercises[k].sets)) : ex.sets;
         const drop = !group && isDropExercise(ex);
         const lastBar = ex.usesBar && last && last.bar != null ? last.bar : null;
-        for (let i = 0; i < nSets; i++) {
-          const src = last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null;
-          const set = {
-            weight: src ? src.weight : ex.targetWeight,
-            side: null,
-            bricks: null,                    // mismo orden de campos que normSet (ver huella de sincronización)
-            reps: src ? src.reps : firstInt(ex.reps),
-            drop: drop ? (src && src.drop ? Object.assign({}, src.drop) : blankDrop(ex.reps)) : null,
-            note: '', done: false,
-          };
-          if (ex.usesBar) {
-            // Con barra se recuerdan los DISCOS por lado. La barra arranca con la última usada
-            // en este ejercicio (se cambia al entrenar); sin barra conocida, el total queda pendiente.
-            set.side = src ? sideOf(src, lastBar) : null;
-            set.weight = set.side != null ? barTotal(lastBar, set.side) : (src ? null : ex.targetWeight);
-            if (set.drop) {
-              set.drop.side = sideOf(set.drop, lastBar);
-              if (set.drop.side != null) set.drop.weight = barTotal(lastBar, set.drop.side);
-            }
-          } else if (ex.usesBricks) {
-            // Máquina con bloques: se recuerdan los LADRILLOS de la última sesión; total = bloques × 5.
-            set.bricks = src ? bricksOf(src) : (ex.targetWeight != null ? round2(ex.targetWeight / BRICK_KG) : null);
-            set.weight = bricksTotal(set.bricks);
-            if (set.drop) {
-              set.drop.bricks = bricksOf(set.drop);
-              if (set.drop.bricks != null) set.drop.weight = bricksTotal(set.drop.bricks);
-            }
-          }
-          sets.push(set);
-        }
+        const sets = buildSets(ex, last, nSets, drop);
         return { name: ex.name, done: false, drop, group, usesBar: !!ex.usesBar,
                  usesBricks: !!ex.usesBricks && !ex.usesBar, bar: lastBar,   // mismo orden que normSession
                  target: { sets: nSets, reps: ex.reps, weight: ex.targetWeight }, sets };
@@ -737,6 +748,35 @@
     state.sessions.push(session);
     commit();
     return session;
+  }
+
+  /** Cambia un ejercicio de la sesión en curso por otro, SOLO en esta sesión (la rutina no se toca).
+   *  Las series ya hechas quedan en el original; el nuevo va después con las que faltan (fuera de la
+   *  superserie) y arranca con lo de su última vez. Devuelve el índice del nuevo o -1. */
+  function swapExercise(session, idx, name) {
+    const ex = session && session.exercises[idx];
+    name = String(name || '').trim().slice(0, 200);
+    if (!ex || session.finished || !name || exKey(name) === exKey(ex.name)) return -1;
+    const done = ex.sets.filter((st) => st.done);
+    const nSets = Math.max(1, ex.sets.length - done.length);
+    const last = lastEntry(name, session.id, session.dayId);
+    const re = state.routine.days.flatMap((d) => d.exercises).find((e) => exKey(e.name) === exKey(name));
+    const usesBar = last ? last.bar != null : !!(re && re.usesBar);
+    const usesBricks = !usesBar && (last ? last.sets.some((st) => st.bricks != null) : !!(re && re.usesBricks));
+    const reps = ex.target.reps;
+    const nx = { name, done: false, drop: ex.drop, group: done.length ? '' : ex.group, usesBar, usesBricks,
+                 bar: usesBar && last ? last.bar : null,   // mismo orden que normSession
+                 target: { sets: nSets, reps, weight: null },
+                 sets: buildSets({ usesBar, usesBricks, reps, targetWeight: null }, last, nSets, ex.drop) };
+    const from = ex.swappedFrom || ex.name;
+    withOptional(nx, 'swappedFrom', exKey(from) === exKey(name) ? null : from);   // volver al original lo deja limpio
+    if (!muscleMap().has(exKey(name))) withOptional(nx, 'muscles', normMuscles(suggestMuscles(name)));
+    if (done.length) {
+      ex.sets = done; ex.done = true;
+      session.exercises.splice(idx + 1, 0, nx);
+    } else session.exercises[idx] = nx;
+    commit();
+    return done.length ? idx + 1 : idx;
   }
 
   /** Cierra la sesión: descarta series sin marcar y ejercicios vacíos. */
@@ -1059,7 +1099,7 @@
       s.exercises.forEach((ex) => {
         const n = ex.sets.filter((st) => st.done).length;
         if (!n) return;
-        const mu = mm.get(exKey(ex.name));
+        const mu = ex.muscles || mm.get(exKey(ex.name));   // los de la sesión: ejercicio cambiado fuera de la rutina
         if (!mu) { unassigned += n; return; }
         mu.primary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n));
         mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
@@ -1355,7 +1395,7 @@
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp, restStart, restClear, restGet,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
-    parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
+    swapExercise, parseRoutineImport, replaceRoutine, hasRoutineBackup, restoreRoutineBackup,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */
     canonSession: (x) => { const { updatedAt, ...rest } = normSession(x); return rest; },
     canonRoutine: (r) => normalize({ routine: r }).routine,
