@@ -307,7 +307,7 @@
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : ICON.check + ' Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
         ${swapBox(s, i)}
@@ -371,7 +371,7 @@
         ${rows.join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : ICON.check + ' Completar'}</button>
         </div>
         ${rpes}
         ${idxs.map((i) => swapBox(s, i, true)).join('')}
@@ -615,7 +615,7 @@
     const back = document.querySelector('.back-day');   // ya hay algo marcado: no se ofrece cambiar de día
     if (back && exs.some((e) => e.sets.some((st) => st.done))) back.remove();
     const btn = card.querySelector('[data-act="complete-ex"]');
-    btn.textContent = all ? 'Desmarcar todo' : '✓ Completar';
+    btn.innerHTML = all ? 'Desmarcar todo' : ICON.check + ' Completar';
     btn.classList.toggle('ok', !all);
     refreshStall(card);
     const bar = document.getElementById('sess-bar');   // sin redibujar: el teclado y el foco siguen donde estaban
@@ -745,7 +745,7 @@
 
   function viewHistory() {
     const list = S.sessions().reverse();
-    if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. ¡Empezá a entrenar!</p>';
+    if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. Empezá por un día en Entrenar</p>';
     // Sin cuenta los datos están solo en este teléfono: cada 10 sesiones sin backup, se recuerda.
     const since = S.sessionsSinceExport();
     const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
