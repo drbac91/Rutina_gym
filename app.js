@@ -1473,7 +1473,7 @@
         ${ui.pasteOpen ? `
           <textarea id="paste-json" rows="8" placeholder='Pegá acá el JSON de la rutina' spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
           <button class="primary block" data-act="apply-paste">Aplicar rutina pegada</button>` : ''}
-        ${S.hasRoutineBackup() ? '<button class="block" data-act="undo-routine">Deshacer última importación de rutina</button>' : ''}
+        ${S.hasRoutineBackup() ? `<button class="block" data-act="undo-routine">Volver a la rutina anterior (${S.hasRoutineBackup()} día(s))</button>` : ''}
       </div>
       <div class="card stack">
         <h2>Rutina de ejemplo</h2>
@@ -1483,7 +1483,7 @@
   }
 
   const BACKUP_WHY = {
-    import: 'antes de restaurar un backup', 'reset-routine': 'antes de volver a la rutina de ejemplo',
+    import: 'antes de restaurar un backup', rutina: 'antes de cambiar la rutina', 'reset-routine': 'antes de volver a la rutina de ejemplo',
     cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
     'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio', músculos: 'antes de revisar "Espalda" en la rutina',
   };
@@ -2077,8 +2077,8 @@
       case 'toggle-paste': ui.pasteOpen = !ui.pasteOpen; render(); break;
       case 'apply-paste': applyRoutineText(document.getElementById('paste-json').value); break;
       case 'undo-routine':
-        if (confirm('¿Volver a la rutina que tenías antes de la última importación? El historial no se modifica.')) {
-          if (S.restoreRoutineBackup()) { toast('Rutina anterior restaurada'); go('routine'); } else alert('No hay rutina anterior guardada.');
+        if (confirm(`¿Cambiar a la rutina anterior (${S.hasRoutineBackup()} día(s))?\n\nLa de ahora queda guardada: podés volver a ella con el mismo botón. El historial no se modifica.`)) {
+          if (S.restoreRoutineBackup()) { toast('Rutina cambiada ✓ — la otra quedó guardada en Datos'); go('routine'); } else alert('No hay rutina anterior guardada.');
         }
         break;
       case 'reset-routine':
