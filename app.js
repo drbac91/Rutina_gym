@@ -8,6 +8,7 @@
 
   /* Estado de la interfaz (no se guarda). */
   const ui = {
+    swap: null,          // { sid, i }: ejercicio de la sesión con el cuadro "Cambiar" abierto
     tab: 'train',
     editId: null,        // id de una sesión ya terminada que se está editando
     open: new Set(),     // ejercicios del editor que están desplegados
@@ -297,7 +298,7 @@
     return `
       <section class="card ex ${ex.done ? 'done' : ''}" data-ex="${i}">
         <div class="ex-head"><h3>${esc(ex.name)}${ex.drop ? helpBtn('drop') : ''}</h3><span class="target">${targetText(ex)}</span></div>
-        ${exerciseNote(s, i)}
+        ${swapNote(ex)}${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
         ${stallNote(s, i)}
         ${barPicker(ex, i)}
@@ -309,6 +310,7 @@
           <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
+        ${swapBox(s, i)}
         ${rpeRow(ex)}
         ${commentBox(ex)}
       </section>`;
@@ -355,7 +357,7 @@
           </div>
         </div>`);
     }
-    const notes = idxs.map((i) => exerciseNote(s, i, true)).join('');
+    const notes = idxs.map((i) => swapNote(s.exercises[i], true) + exerciseNote(s, i, true)).join('');
     const rpes = idxs.map((i) => `<div data-ex="${i}">${rpeRow(s.exercises[i])}</div>`).join('');
     const prevs = exs.map((e) => `<p class="prev"><b>${esc(e.name)}</b> · ${prevText(s, e)}</p>`).join('');
     return `
@@ -372,8 +374,24 @@
           <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : '✓ Completar'}</button>
         </div>
         ${rpes}
+        ${idxs.map((i) => swapBox(s, i, true)).join('')}
         ${exs.map((e) => commentBox(e, true)).join('')}
       </section>`;
+  }
+
+  /** "Cambiar ejercicio" solo por hoy (la rutina no se toca). Con el cuadro abierto, pide el nuevo nombre. */
+  function swapBox(s, i, withName) {
+    const ex = s.exercises[i];
+    if (s.finished || ex.done) return '';
+    if (!ui.swap || ui.swap.sid !== s.id || ui.swap.i !== i) {
+      return `<button class="link-btn" data-act="swap-ex" data-i="${i}">Cambiar ${withName ? esc(ex.name) : 'ejercicio'}</button>`;
+    }
+    return `<div class="stack swap-box">
+        <label>Cambiar ${esc(ex.name)} por (solo hoy; la rutina no cambia)
+          <input data-swap list="ex-names" autocomplete="off" enterkeyhint="done" placeholder="Nombre del ejercicio"></label>
+        ${nameList()}
+        <div class="row"><button class="primary" data-act="swap-go">Cambiar</button><button data-act="swap-cancel">Cancelar</button></div>
+      </div>`;
   }
 
   /** Barra fija de avance de la sesión: series hechas sobre el total. */
@@ -460,6 +478,10 @@
     if (!re || !re.notes) return '';
     return `<div class="note ${isRevisar(re.notes) ? 'revisar' : ''}">${withName ? '<b>' + esc(s.exercises[i].name) + ':</b> ' : ''}${esc(re.notes)}</div>`;
   }
+
+  /** Aviso de ejercicio cambiado en la sesión: "en lugar de X". */
+  const swapNote = (ex, withName) => (ex.swappedFrom
+    ? `<div class="note">${withName ? '<b>' + esc(ex.name) + ':</b> ' : ''}En lugar de ${esc(ex.swappedFrom)} (solo hoy)</div>` : '');
 
   /* ---------- peso: directo, por lado (barra) o en bloques (máquina) ---------- */
 
@@ -742,7 +764,7 @@
         const sets = ex.sets.filter((x) => x.done).map(fmtSet).join(', ');
         if (!sets) return '';
         const extra = exMetrics(ex);
-        return `<div class="hist-ex"><b>${esc(ex.name)}</b> ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">${extra}</span>` : ''}</div>`;
+        return `<div class="hist-ex"><b>${esc(ex.name)}</b>${ex.swappedFrom ? ` <span class="muted">(en lugar de ${esc(ex.swappedFrom)})</span>` : ''} ${sets}${ex.bar != null ? ` <span class="muted">(barra ${fmt(ex.bar)})</span>` : ''}${extra ? ` <span class="muted hist-extra">${extra}</span>` : ''}</div>`;
       }).join('');
       return `
       <article class="card ${sel && sel.has(s.id) ? 'picked' : ''}" data-sid="${esc(s.id)}">
@@ -1865,6 +1887,25 @@
         if (c.exs.every((e) => e.done)) { haptic(18); restMark(c.s); }
         break;
       }
+      case 'swap-ex':
+        ui.swap = { sid: c.s.id, i: +btn.dataset.i }; render();
+        { const inp = document.querySelector('[data-swap]'); if (inp) { inp.focus(); inp.scrollIntoView({ block: 'center' }); } }
+        break;
+      case 'swap-cancel': ui.swap = null; render(); break;
+      case 'swap-go': {
+        const inp = document.querySelector('[data-swap]');
+        const name = inp ? inp.value.trim() : '';
+        const { s } = c, i = ui.swap && ui.swap.sid === (s && s.id) ? ui.swap.i : -1;
+        if (!name) { toast('Escribí el ejercicio nuevo'); break; }
+        const snap = JSON.stringify(s.exercises);
+        if (S.swapExercise(s, i, name) < 0) { toast('Es el mismo ejercicio'); break; }
+        ui.swap = null; render();
+        toast(`Cambiado solo por hoy`, { label: 'Deshacer', fn: () => {
+          if (currentSession() !== s) { toast('Ya no se puede deshacer'); return; }
+          s.exercises = JSON.parse(snap); S.commit(); render();
+        } });
+        break;
+      }
       case 'finish': finishSession(); break;
       case 'discard':
         if (confirm('¿Descartar esta sesión? Se pierde lo cargado.')) { S.deleteSession(c.s.id); S.restClear(); toast('Sesión descartada'); render(); }
@@ -2278,6 +2319,9 @@
   /* En el editor de Rutina, Enter pasa al campo siguiente (nombre → series → reps → peso → notas). */
   $view.addEventListener('keydown', (e) => {
     const el = e.target;
+    if (e.key === 'Enter' && el.matches && el.matches('input[data-swap]')) {   // Enter en "Cambiar ejercicio" = Cambiar
+      e.preventDefault(); el.closest('.swap-box').querySelector('[data-act="swap-go"]').click(); return;
+    }
     if (e.key !== 'Enter' || !el.matches || !el.matches('input[data-rf]')) return;
     const fields = [...el.closest('details.exe').querySelectorAll('[data-rf]')];
     const next = fields[fields.indexOf(el) + 1];
