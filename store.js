@@ -1279,8 +1279,9 @@
     return normalize({ routine: { days: withIds } }).routine;
   }
 
-  /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer. */
+  /** Reemplaza solo la rutina. Guarda la anterior para poder deshacer (y una copia automática). */
   function replaceRoutine(routine) {
+    backup('rutina');
     try {
       localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), owner: localOwner(), routine: state.routine }));
     } catch (e) { /* nada */ }
@@ -1296,15 +1297,19 @@
       return b && (b.owner || '') === localOwner() ? b : null;
     } catch (e) { return null; }
   };
-  const hasRoutineBackup = () => !!myRoutineBackup();
+  /** Cantidad de días de la rutina guardada para deshacer (0 = no hay). */
+  const hasRoutineBackup = () => { const b = myRoutineBackup(); return b && b.routine && Array.isArray(b.routine.days) ? b.routine.days.length : 0; };
 
-  /** Vuelve a la rutina anterior a la última importación. Devuelve true si pudo. */
+  /** Vuelve a la rutina anterior a la última importación. Intercambia: la de ahora queda guardada,
+   *  así deshacer nunca pierde una rutina. Devuelve true si pudo. */
   function restoreRoutineBackup() {
     try {
       const b = myRoutineBackup();
       if (!b) return false;
-      state.routine = normalize({ routine: b.routine }).routine;
-      localStorage.removeItem(ROUTINE_BACKUP_KEY);
+      const next = normalize({ routine: b.routine }).routine;
+      backup('rutina');
+      localStorage.setItem(ROUTINE_BACKUP_KEY, JSON.stringify({ at: Date.now(), owner: localOwner(), routine: state.routine }));
+      state.routine = next;
       commit();
       return true;
     } catch (e) { return false; }
