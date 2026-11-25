@@ -255,35 +255,40 @@
     return `${t.sets || ex.sets.length}×${esc(t.reps)}${t.weight != null ? ' · ' + fmt(t.weight) + ' ' + unit() : ''}`;
   };
 
-  /** Reps para el objetivo: las de la rutina si se pueden usar en el 1RM estimado ('8-10' = 8,
-   *  '10-10' = 10); si no ('12-15', '1 min'), las de la marca. */
-  function stallReps(ex, best) {
-    const m = /^\s*(\d+)\s*(?:-\s*\d+\s*)?$/.exec(String((ex.target || {}).reps ?? ''));
-    const n = m ? Number(m[1]) : 0;
-    return n >= 1 && n <= S.E1RM_MAX_REPS ? n : best.reps;
+  /** Objetivo de hoy según la doble progresión: { w, reps } o null. */
+  function progGoal(ex, p) {
+    const [lo, hi] = p.range, minR = Math.min(...p.reps);
+    if (p.verdict === 'subir') return { w: p.weight + (loadMode(ex) === 'bricks' ? S.BRICK_KG : unit() === 'lb' ? 5 : 2.5), reps: lo };
+    if (p.verdict === 'reps' || p.verdict === 'estancado') return { w: p.weight, reps: Math.min(hi, minR + 1) };
+    if (p.verdict === 'consolidar' || p.verdict === 'retroceso') return { w: p.weight, reps: Math.min(hi, Math.max(lo, minR)) };
+    return null;
   }
 
-  /** Aviso de estancamiento en la tarjeta. Solo en la sesión en curso; si una serie marcada ya
-   *  supera la marca, felicita en vez de avisar. */
+  /** Aviso de progresión en la tarjeta (solo en la sesión en curso): primero reps dentro del rango,
+   *  después peso. Si una serie marcada ya cumple el objetivo, lo dice en vez de avisar. */
   function stallNote(s, i, withName) {
     const ex = s.exercises[i];
-    const x = !s.finished && S.stallOf(S.exKey(ex.name));
-    if (!x) return '';
+    const p = !s.finished && S.progressionOf(S.exKey(ex.name));
+    const g = p && progGoal(ex, p);
+    if (!g) return '';
     const who = withName ? esc(ex.name) + ': ' : '';
     const attrs = `data-stall="${i}" data-named="${withName ? 1 : ''}"`;
-    const top = ex.sets.reduce((a, st) => {
-      const v = st.done ? S.e1rm(st.weight, st.reps) : null;
-      return v != null && (!a || v > a.v) ? { v, st } : a;
-    }, null);
-    if (top && top.v > x.before) {
-      return `<div class="note stall-ok" ${attrs}><b>${who}Superaste tu marca:</b> ${fmt(top.st.weight)} ${unit()} × ${top.st.reps}</div>`;
-    }
-    const mode = loadMode(ex), reps = stallReps(ex, x.best);
-    const step = mode === 'bricks' ? S.BRICK_KG : unit() === 'lb' ? 5 : 2.5;
+    const met = ex.sets.find((st) => st.done && st.weight >= g.w && st.reps >= g.reps);
+    if (met) return `<div class="note stall-ok" ${attrs}><b>${who}Objetivo cumplido:</b> ${fmt(met.weight)} ${unit()} × ${met.reps}</div>`;
+    const [lo, hi] = p.range, mode = loadMode(ex);
     const bar = mode === 'bar' && ex.bar != null ? ex.bar : 0;
-    const w = S.stallGoal(x.before, reps, step, bar);
-    const how = bar ? ` (${fmt((w - bar) / 2)} por lado)` : mode === 'bricks' ? ` (${fmt(w / S.BRICK_KG)} bloques)` : '';
-    return `<div class="note revisar" ${attrs}><b>${who}Estancado:</b> ${x.sessions} sesiones sin superar tu marca. Para superarla: <b>${fmt(w)} ${unit()} × ${reps}</b>${how}</div>`;
+    const how = bar ? ` (${fmt((g.w - bar) / 2)} por lado)` : mode === 'bricks' ? ` (${fmt(g.w / S.BRICK_KG)} bloques)` : '';
+    const goal = `<b>${fmt(g.w)} ${unit()} × ${g.reps}</b>${how}`;
+    const rir = p.effort ? '' : ' Anotá el RIR para un consejo más preciso.';
+    const txt = {
+      subir: `<b>${who}Listo para subir:</b> probá ${goal}. Llegaste al tope del rango (${lo}-${hi}) ${p.why.includes('reserva') ? 'con reps de reserva' : 'dos veces seguidas'}.`,
+      consolidar: `<b>${who}Repetí el peso:</b> ${goal}. ${esc(p.why.charAt(0).toUpperCase() + p.why.slice(1))}. Subí cuando llegues a ${hi} con al menos 1 rep de reserva.`,
+      reps: `<b>${who}Objetivo:</b> ${goal} (rango ${lo}-${hi}). Primero reps, después peso.`,
+      estancado: `<b>${who}Estancado:</b> ${p.sessions} sesiones con ${fmt(p.weight)} ${unit()} sin sumar reps. No subas el peso: buscá ${goal}, descansá más entre series o hacé una semana más liviana.${rir}`,
+      retroceso: `<b>${who}Bajaron tus reps</b> dos sesiones seguidas, al límite: posible cansancio. Repetí ${goal} o hacé una semana más liviana.`,
+    }[p.verdict];
+    const warn = ['estancado', 'retroceso'].includes(p.verdict) || (p.verdict === 'consolidar' && p.why.includes('debajo'));
+    return `<div class="note ${warn ? 'revisar' : ''}" ${attrs}>${txt}</div>`;
   }
 
   /** Vuelve a calcular los avisos de una tarjeta sin redibujarla. */
@@ -979,13 +984,24 @@
       </div>`;
   }
 
-  /** Ejercicios sin mejora del 1RM estimado en las últimas STALL_WEEKS semanas. */
+  /** Estancamientos y próximos pasos (doble progresión): lo que pide atención primero. */
   function stallsCard() {
-    const list = S.stalls();
+    const order = ['retroceso', 'estancado', 'consolidar', 'subir'];
+    const list = S.exerciseNames().map(({ key, name }) => ({ name, p: S.progressionOf(key) }))
+      .filter((x) => x.p && order.includes(x.p.verdict))
+      .sort((a, b) => order.indexOf(a.p.verdict) - order.indexOf(b.p.verdict));
+    const w = (p) => `${fmt(p.weight)} ${unit()}`;
+    const line = ({ name, p }) => ({
+      retroceso: `<span class="warn-txt">bajan las reps</span> con ${w(p)}, al límite: posible cansancio.`,
+      estancado: `<span class="warn-txt">estancado</span>: ${p.sessions} sesiones con ${w(p)} sin sumar reps. No subas el peso.`,
+      consolidar: `repetí ${w(p)} (${esc(p.why)}).`,
+      subir: `listo para subir de ${w(p)}: llegaste a ${p.range[1]} reps.`,
+    }[p.verdict]);
     const body = list.length
-      ? list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> mejor antes ${fmt(x.before)} ${unit()} · últimas ${S.STALL_WEEKS} semanas ${fmt(x.after)} ${unit()} (${x.sessions} sesión/es)</div>`).join('')
-      : `<p class="muted">Ninguno: o mejoraste en las últimas ${S.STALL_WEEKS} semanas, o todavía no hay datos de antes y después para comparar (hacen falta ${S.STALL_MIN_SESSIONS} sesiones en esas semanas).</p>`;
-    return `<div class="card"><h2>Estancamientos</h2>${body}<p class="muted">Compara tu mejor 1RM estimado de las últimas ${S.STALL_WEEKS} semanas contra el de antes. También te avisa en la tarjeta del ejercicio cuando entrenás.</p></div>`;
+      ? list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> ${line(x)}</div>`).join('')
+      : '<p class="muted">Nada para revisar: venís sumando reps o peso, o todavía faltan datos (hacen falta 2 sesiones del ejercicio en las últimas 5 semanas).</p>';
+    return `<div class="card"><h2>Estancamientos y próximos pasos</h2>${body}
+      <p class="muted">Primero reps, después peso: con el mismo peso buscás llegar al tope del rango de reps (el de la rutina; si dice un número, se deduce: 8 → 8-12, 3 → 3-6). Subís cuando llegás al tope con reserva (RIR 2 o más, o RPE 8 o menos) o dos veces seguidas. Estancado = ${S.PROG_STALL_SESSIONS} sesiones iguales sin reserva. También te avisa en la tarjeta del ejercicio cuando entrenás.</p></div>`;
   }
 
   /** Peso corporal: se carga acá y cada valor rige como referencia hasta el siguiente. */
