@@ -120,6 +120,10 @@ body {
   padding-bottom: calc(var(--tabs-h) + 36px + env(safe-area-inset-bottom));
 }
 main { max-width: 640px; margin: 0 auto; padding: 8px 16px 16px; padding-top: calc(8px + env(safe-area-inset-top)); }
+/* Teléfono en horizontal (poca altura): usa todo el ancho, sin franjas, y respeta el notch a los costados. */
+@media (orientation: landscape) and (max-height: 520px) {
+  main { max-width: none; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+}
 svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -.125em; flex: none; }
 
 /* ---------- tipografía: espaciado según el tamaño ---------- */
