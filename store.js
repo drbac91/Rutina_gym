@@ -227,7 +227,10 @@
     };
     const bw = Number(s.bodyweight), fin = Number(s.finishedAt);
     withOptional(out, 'bodyweight', Number.isFinite(bw) && bw > 0 ? bw : null);   // peso corporal ese día (opcional)
-    return withOptional(out, 'finishedAt', Number.isFinite(fin) && fin > 0 ? fin : null);   // hora de fin (opcional)
+    withOptional(out, 'finishedAt', Number.isFinite(fin) && fin > 0 ? fin : null);   // hora de fin (opcional)
+    // ejercicios que quedaron sin hacer al finalizar (opcional: solo si faltó alguno)
+    const sk = Array.isArray(s.skipped) ? s.skipped.map((x) => String(x).slice(0, 200)).filter(Boolean) : [];
+    return withOptional(out, 'skipped', sk.length ? sk : null);
   }
 
   /** Limpia el mapa de comentarios: claves normalizadas, sin textos vacíos. */
@@ -800,11 +803,18 @@
     const s = find(state.sessions, id);
     if (!s) return null;
     s.exercises.forEach((ex) => { ex.sets = ex.sets.filter((st) => st.done); });
+    // Los ejercicios sin ninguna serie se quitan, pero se anotan en `skipped` para que se vea que faltaron.
+    // Al editar se suman a los anotados la primera vez (esos ya no están en la sesión).
+    const gone = s.exercises.filter((ex) => !ex.sets.length).map((ex) => ex.name);
     s.exercises = s.exercises.filter((ex) => ex.sets.length > 0);
+    const here = new Set(s.exercises.map((ex) => exKey(ex.name)));
+    const skipped = [...new Set([...(s.skipped || []), ...gone])].filter((n) => !here.has(exKey(n)));
+    delete s.skipped;
     // Solo la primera vez (no al editar). Si la sesión quedó abierta más del tope, la hora de fin no
     // es real (se terminó mucho después): no se guarda, para no inventar una duración.
     if (!s.finished && !s.finishedAt && Date.now() - s.created <= MAX_SESSION_MINUTES * 60000) s.finishedAt = Date.now();
     s.finished = true;
+    withOptional(s, 'skipped', skipped.length ? skipped : null);   // último campo, como en normSession
     commit();
     return s;
   }
@@ -898,7 +908,7 @@
     const day = find(state.routine.days, dayId);
     return sortedSessions()
       .filter((s) => s.finished && (day ? isDay(s, day) : s.dayId === dayId))
-      .map((s) => ({ date: s.date, volume: round2(sessionVolume(s)) }));
+      .map((s) => ({ date: s.date, volume: round2(sessionVolume(s)), skipped: s.skipped || [] }));
   };
 
   /** Por cada día de la rutina: última vez que se hizo ({ date, order } u null) y cuántas veces en
@@ -1177,14 +1187,18 @@
       s.exercises.forEach((ex) => {
         const n = ex.sets.filter((st) => st.done).length;
         if (!n) return;
-        const mu = ex.muscles || mm.get(exKey(ex.name));   // los de la sesión: ejercicio cambiado fuera de la rutina
+        const k = exKey(ex.name);
+        // los de la sesión (ejercicio cambiado fuera de la rutina); si no, los de la rutina; si no, los que sugiere
+        // el nombre (rutinas cargadas antes de la sugerencia automática). Solo se calcula, no se guarda.
+        if (!ex.muscles && !mm.has(k)) mm.set(k, suggestMuscles(ex.name));
+        const mu = ex.muscles || mm.get(k);
         if (!mu) { unassigned += n; return; }
         mu.primary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n));
         mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
       });
     });
     // Músculos que la rutina trabaja y esa semana no tuvieron series: van al final, en 0 (para ver el desequilibrio).
-    mm.forEach((mu) => [...mu.primary, ...mu.secondary].forEach((x) => { if (!tot.has(x)) tot.set(x, 0); }));
+    mm.forEach((mu) => mu && [...mu.primary, ...mu.secondary].forEach((x) => { if (!tot.has(x)) tot.set(x, 0); }));
     return { list: [...tot].map(([muscle, sets]) => ({ muscle, sets: round2(sets) })).sort((a, b) => b.sets - a.sets), unassigned };
   }
 

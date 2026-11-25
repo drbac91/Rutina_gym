@@ -312,7 +312,7 @@
         ${ex.sets.map((st, j) => setRow(st, j, ex)).join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${ex.done ? '' : 'ok'}">${ex.done ? 'Desmarcar todo' : ICON.check + ' Completar'}</button>
         </div>
         <button class="link-btn" data-act="toggle-drop">${ex.drop ? 'Quitar drop set' : 'Activar drop set'}</button>
         ${swapBox(s, i)}
@@ -376,7 +376,7 @@
         ${rows.join('')}
         <div class="row" style="margin-top:8px">
           <button data-act="add-set">+ Serie</button>
-          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : '✓ Completar'}</button>
+          <button data-act="complete-ex" class="${allDone ? '' : 'ok'}">${allDone ? 'Desmarcar todo' : ICON.check + ' Completar'}</button>
         </div>
         ${rpes}
         ${idxs.map((i) => swapBox(s, i, true)).join('')}
@@ -620,7 +620,7 @@
     const back = document.querySelector('.back-day');   // ya hay algo marcado: no se ofrece cambiar de día
     if (back && exs.some((e) => e.sets.some((st) => st.done))) back.remove();
     const btn = card.querySelector('[data-act="complete-ex"]');
-    btn.textContent = all ? 'Desmarcar todo' : '✓ Completar';
+    btn.innerHTML = all ? 'Desmarcar todo' : ICON.check + ' Completar';
     btn.classList.toggle('ok', !all);
     refreshStall(card);
     const bar = document.getElementById('sess-bar');   // sin redibujar: el teclado y el foco siguen donde estaban
@@ -667,11 +667,12 @@
   /** Cuenta las series: con ✓, cargadas sin ✓ (se pueden guardar) y vacías (sin reps).
    *  "where" = "Press inclinado (3) · Aperturas (4)": dónde quedaron las cargadas sin ✓. */
   function countSets(s) {
-    const c = { done: 0, loaded: 0, empty: 0 }, by = [];
+    const c = { done: 0, loaded: 0, empty: 0, started: 0, untouched: [] }, by = [];
     s.exercises.forEach((ex) => {
       let n = 0;
       ex.sets.forEach((st) => { if (st.done) c.done++; else if (markable(ex, st)) n++; else c.empty++; });
       if (n) { c.loaded += n; by.push(`${ex.name} (${n})`); }
+      if (!ex.sets.some((st) => st.done)) { if (n) c.untouched.push(ex.name); } else c.started += n;   // sin ninguna ✓ = no empezado
     });
     c.where = by.slice(0, 4).join(' · ') + (by.length > 4 ? ` y ${by.length - 4} ejercicio(s) más` : '');
     return c;
@@ -685,12 +686,23 @@
     const s = currentSession();
     if (!s || finishing) return;
     const editing = !!ui.editId;
-    const { done, loaded, empty, where } = countSets(s);
+    const { done, loaded, empty, where, started, untouched } = countSets(s);
     const emptyTxt = empty ? ` Las ${empty} vacías (sin reps) no se guardan.` : '';
     const loadedTxt = `Sin ✓: ${where}. Revisá si las hiciste: pueden tener los números que la app completó sola.${emptyTxt}`;
     let choice = 'save';
 
-    if (loaded && done) {
+    if (loaded && done && untouched.length) {
+      // Ejercicios sin ninguna ✓: lo más probable es que no se hicieron. Guardarlos como hechos con los
+      // números que completó la app inventaría datos, así que la opción principal los deja afuera.
+      choice = await askFinish(`Hay ${untouched.length} ejercicio(s) sin ninguna ✓`,
+        `${untouched.join(', ')}. Si no los hiciste, quedan anotados como "sin hacer" y no cuentan en tu progreso.`
+        + (started ? ` En los que sí empezaste quedan ${started} serie(s) sin ✓.` : '') + emptyTxt, [
+        { label: started ? `Guardar sin esos ejercicios (y las ${started} series de los otros)` : 'Guardar sin esos ejercicios', value: 'started', cls: 'primary' },
+        ...(started ? [{ label: done === 1 ? 'Guardar solo la serie con ✓' : `Guardar solo las ${done} con ✓`, value: 'save' }] : []),
+        { label: `Los hice: guardar las ${done + loaded} series`, value: 'all' },
+        { label: 'Volver a la sesión', value: null },
+      ]);
+    } else if (loaded && done) {
       choice = await askFinish(`Hay ${loaded} serie(s) sin ✓`, `Marcaste ${done} con ✓. ${loadedTxt}`, [
         { label: `Guardar las ${done + loaded} series`, value: 'all', cls: 'primary' },
         { label: done === 1 ? 'Guardar solo la serie con ✓' : `Guardar solo las ${done} con ✓`, value: 'save' },
@@ -726,10 +738,12 @@
       go(editing ? 'history' : 'train');
       return;
     }
-    if (choice === 'all') {
-      const lines = live.exercises.flatMap((ex) => warnings(live, ex, ex.sets.filter((st) => !st.done && markable(ex, st))));
+    if (choice === 'all' || choice === 'started') {
+      // 'started': solo en los ejercicios que tienen alguna ✓
+      const exs = live.exercises.filter((ex) => choice === 'all' || ex.sets.some((st) => st.done));
+      const lines = exs.flatMap((ex) => warnings(live, ex, ex.sets.filter((st) => !st.done && markable(ex, st))));
       if (!okToMark(lines)) return;
-      live.exercises.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
+      exs.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
     }
     S.finishSession(live.id);
     S.restClear();
@@ -750,7 +764,7 @@
 
   function viewHistory() {
     const list = S.sessions().reverse();
-    if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. ¡Empezá a entrenar!</p>';
+    if (!list.length) return '<h1>Historial</h1><p class="empty">Todavía no hay sesiones. Empezá por un día en Entrenar</p>';
     // Sin cuenta los datos están solo en este teléfono: cada 10 sesiones sin backup, se recuerda.
     const since = S.sessionsSinceExport();
     const remind = !(window.Cloud && Cloud.user) && since >= 10 ? `
@@ -780,6 +794,7 @@
         </div>
         <p class="muted">Volumen: ${fmt(vol)} ${unit()}${S.sessionMinutes(s) != null ? ' · ' + S.sessionMinutes(s) + ' min' : ''}${s.bodyweight ? ' · peso corporal ' + fmt(s.bodyweight) + ' ' + unit() : ''}</p>
         ${exs}
+        ${s.skipped ? `<div class="hist-ex muted"><span class="warn-txt">Sin hacer (${s.skipped.length} de ${s.skipped.length + s.exercises.length}):</span> ${s.skipped.map(esc).join(', ')}</div>` : ''}
         ${sel ? '' : `<div class="row" style="margin-top:10px">
           <button data-act="edit-session">${s.finished ? 'Editar' : 'Continuar'}</button>
           <button data-act="del-session" class="danger">Borrar</button>
@@ -1101,7 +1116,7 @@
         <select id="p-day" data-f="progday">${days.map((d) =>
           `<option value="${esc(d.id)}" ${d.id === ui.progDay ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
         ${msg ? `<p class="muted chart-empty">${msg}</p>` : '<div class="svgchart" data-chart="day"></div>'}
-        <p class="muted">Volumen de cada sesión = suma de peso × reps (incluye la parte drop).</p>
+        <p class="muted">Volumen de cada sesión = suma de peso × reps (incluye la parte drop).${pts.some((p) => p.skipped.length) ? ' <span class="warn-txt">■</span> Barra naranja = sesión en la que quedaron ejercicios sin hacer: su volumen es más bajo por eso, no por haber retrocedido.' : ''}</p>
       </div>`;
   }
 
@@ -1190,8 +1205,8 @@
         const pts = S.dayVolumes(ui.progDay);
         el.innerHTML = svgChart({
           width, labels: pts.map((p) => fmtShort(p.date)), bars: pts.map((p) => p.volume),
-          barName: `Volumen de la sesión (${unit()})`,
-          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.volume)} ${unit()}`),
+          barName: `Volumen de la sesión (${unit()})`, barCls: pts.map((p) => (p.skipped.length ? 'inc' : '')),
+          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.volume)} ${unit()}` + (p.skipped.length ? ` · sin hacer: ${p.skipped.join(', ')}` : '')),
         });
       } else {
         const list = S.cycles().list;
@@ -2440,19 +2455,27 @@
     const a = document.activeElement;
     return !!(a && $view.contains(a) && a.matches('input, textarea, select'));
   };
-  /* iOS: al cerrar el teclado el viewport a veces queda desplazado y la barra fija
-     queda flotando. Un scroll mínimo fuerza a Safari a recalcular el borde inferior. */
-  document.addEventListener('focusout', () => {
-    setTimeout(() => {
-      const a = document.activeElement;
-      if (a && a.matches && a.matches('input, textarea, select')) return;
+  /* iOS: al cerrar el teclado Safari a veces deja la barra fija donde estaba el borde del teclado.
+     Mientras se escribe la barra se esconde (encima del teclado no sirve); se vuelve a mostrar recién
+     cuando el teclado terminó de cerrarse, y un scroll de 1 px en dos cuadros obliga a recalcular el borde. */
+  const editing = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]), textarea, select')); };
+  let kbTimer = 0;
+  const kbClosed = () => {
+    clearTimeout(kbTimer);
+    if (!document.body.classList.contains('kb') || editing()) return;
+    document.body.classList.remove('kb');
+    requestAnimationFrame(() => {
       const y = window.scrollY;
-      window.scrollTo(0, y + 1); window.scrollTo(0, y);
-    }, 120);
-  });
+      window.scrollTo(0, y + 1);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    });
+  };
+  document.addEventListener('focusin', () => { if (editing()) document.body.classList.add('kb'); });
+  // Respaldo por si el alto no cambia (teclado físico, Android sin redimensionar): al salir del campo.
+  document.addEventListener('focusout', () => { clearTimeout(kbTimer); kbTimer = setTimeout(kbClosed, 700); });
   if (window.visualViewport) {
     visualViewport.addEventListener('resize', () => {
-      if (Math.abs(visualViewport.offsetTop) > 1 && !typing()) window.scrollTo(0, window.scrollY);
+      if (visualViewport.height > window.innerHeight - 60) kbClosed();
     });
   }
 
