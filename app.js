@@ -745,6 +745,14 @@
     ui.editId = null;
     toast((editing ? 'Cambios guardados ✓' : 'Sesión guardada ✓') + (empty ? ` · ${empty} vacía(s) sin guardar` : ''));
     go('history');
+    // Resumen sobrio de marcas: solo al terminar una sesión nueva y si hubo alguna.
+    const prs = editing ? [] : S.sessionPRs(live.id);
+    if (prs.length) {
+      const lines = prs.map((p) => `${esc(p.name)}: ${p.kinds.map((k) => k === 'peso' ? `peso ${fmt(p.weight)} kg`
+        : k === '1RM' ? `1RM est. ${fmt(p.e1rm)} kg` : `volumen ${fmt(p.volume)} kg`).join(' · ')}`);
+      await choose(prs.length === 1 ? 'Una marca nueva hoy' : `${prs.length} marcas nuevas hoy`, lines.join('<br>'),
+        [{ label: 'Listo', value: true, cls: 'primary' }]);
+    }
   }
 
   /** Abre la ventana de opciones de finalizar, bloqueando un segundo "Finalizar" mientras está abierta. */
