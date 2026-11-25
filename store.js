@@ -40,7 +40,8 @@
   const E1RM_MAX_REPS = 10;
   // Doble progresión (avisos de la tarjeta y de Progreso): primero reps dentro del rango, después peso.
   // Rango deducido de un número de reps: hasta 5 → +3 (3 → 3-6), hasta 9 → +4 (8 → 8-12), hasta 14 → +3, más → +5.
-  const REP_RANGE_STEPS = [[5, 3], [9, 4], [14, 3], [Infinity, 5]];
+  const REP_RANGE_NONE = 5;
+  const REP_RANGE_STEPS = [[9, 4], [14, 3], [Infinity, 5]];
   const PROG_STALL_SESSIONS = 3;   // sesiones seguidas con el mismo peso sin más reps para hablar de estancamiento
   const PROG_MAX_DAYS = 35;        // sin entrenarlo en este tiempo, no se opina (los datos son viejos)
   /** Cuánto cuenta una serie para cada músculo SECUNDARIO (el principal cuenta 1). */
@@ -1022,6 +1023,7 @@
     const a = m ? Number(m[1]) : Number(fallback) || 0, b = m && m[2] ? Number(m[2]) : 0;
     if (!(a >= 1)) return null;
     if (b > a) return [a, b];
+    if (a <= REP_RANGE_NONE) return null; // fuerza (5 reps o menos): sin rango inventado, solo si lo escribís ("4-6")
     return [a, a + REP_RANGE_STEPS.find(([max]) => a <= max)[1]];
   }
 
