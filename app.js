@@ -2424,19 +2424,27 @@
     const a = document.activeElement;
     return !!(a && $view.contains(a) && a.matches('input, textarea, select'));
   };
-  /* iOS: al cerrar el teclado el viewport a veces queda desplazado y la barra fija
-     queda flotando. Un scroll mínimo fuerza a Safari a recalcular el borde inferior. */
-  document.addEventListener('focusout', () => {
-    setTimeout(() => {
-      const a = document.activeElement;
-      if (a && a.matches && a.matches('input, textarea, select')) return;
+  /* iOS: al cerrar el teclado Safari a veces deja la barra fija donde estaba el borde del teclado.
+     Mientras se escribe la barra se esconde (encima del teclado no sirve); se vuelve a mostrar recién
+     cuando el teclado terminó de cerrarse, y un scroll de 1 px en dos cuadros obliga a recalcular el borde. */
+  const editing = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]), textarea, select')); };
+  let kbTimer = 0;
+  const kbClosed = () => {
+    clearTimeout(kbTimer);
+    if (!document.body.classList.contains('kb') || editing()) return;
+    document.body.classList.remove('kb');
+    requestAnimationFrame(() => {
       const y = window.scrollY;
-      window.scrollTo(0, y + 1); window.scrollTo(0, y);
-    }, 120);
-  });
+      window.scrollTo(0, y + 1);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    });
+  };
+  document.addEventListener('focusin', () => { if (editing()) document.body.classList.add('kb'); });
+  // Respaldo por si el alto no cambia (teclado físico, Android sin redimensionar): al salir del campo.
+  document.addEventListener('focusout', () => { clearTimeout(kbTimer); kbTimer = setTimeout(kbClosed, 700); });
   if (window.visualViewport) {
     visualViewport.addEventListener('resize', () => {
-      if (Math.abs(visualViewport.offsetTop) > 1 && !typing()) window.scrollTo(0, window.scrollY);
+      if (visualViewport.height > window.innerHeight - 60) kbClosed();
     });
   }
 
