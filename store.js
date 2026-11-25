@@ -1132,14 +1132,18 @@
       s.exercises.forEach((ex) => {
         const n = ex.sets.filter((st) => st.done).length;
         if (!n) return;
-        const mu = ex.muscles || mm.get(exKey(ex.name));   // los de la sesión: ejercicio cambiado fuera de la rutina
+        const k = exKey(ex.name);
+        // los de la sesión (ejercicio cambiado fuera de la rutina); si no, los de la rutina; si no, los que sugiere
+        // el nombre (rutinas cargadas antes de la sugerencia automática). Solo se calcula, no se guarda.
+        if (!ex.muscles && !mm.has(k)) mm.set(k, suggestMuscles(ex.name));
+        const mu = ex.muscles || mm.get(k);
         if (!mu) { unassigned += n; return; }
         mu.primary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n));
         mu.secondary.forEach((x) => tot.set(x, (tot.get(x) || 0) + n * SECONDARY_MUSCLE_FACTOR));
       });
     });
     // Músculos que la rutina trabaja y esa semana no tuvieron series: van al final, en 0 (para ver el desequilibrio).
-    mm.forEach((mu) => [...mu.primary, ...mu.secondary].forEach((x) => { if (!tot.has(x)) tot.set(x, 0); }));
+    mm.forEach((mu) => mu && [...mu.primary, ...mu.secondary].forEach((x) => { if (!tot.has(x)) tot.set(x, 0); }));
     return { list: [...tot].map(([muscle, sets]) => ({ muscle, sets: round2(sets) })).sort((a, b) => b.sets - a.sets), unassigned };
   }
 
