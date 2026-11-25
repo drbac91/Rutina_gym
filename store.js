@@ -38,10 +38,12 @@
   /* ---------- umbrales de las métricas de Progreso (ajustables) ---------- */
   /** El 1RM estimado solo se calcula con series de hasta estas repeticiones. */
   const E1RM_MAX_REPS = 10;
-  /** Semanas sin mejorar el 1RM estimado para avisar "estancado" (3–4 es lo habitual). */
-  const STALL_WEEKS = 3;
-  /** Sesiones mínimas en esas semanas para avisar: una sola sesión floja no es un estancamiento. */
-  const STALL_MIN_SESSIONS = 2;
+  // Doble progresión (avisos de la tarjeta y de Progreso): primero reps dentro del rango, después peso.
+  // Rango deducido de un número de reps: hasta 5 → +3 (3 → 3-6), hasta 9 → +4 (8 → 8-12), hasta 14 → +3, más → +5.
+  const REP_RANGE_NONE = 5;
+  const REP_RANGE_STEPS = [[9, 4], [14, 3], [Infinity, 5]];
+  const PROG_STALL_SESSIONS = 3;   // sesiones seguidas con el mismo peso sin más reps para hablar de estancamiento
+  const PROG_MAX_DAYS = 35;        // sin entrenarlo en este tiempo, no se opina (los datos son viejos)
   /** Cuánto cuenta una serie para cada músculo SECUNDARIO (el principal cuenta 1). */
   const SECONDARY_MUSCLE_FACTOR = 0.5;
   /** Una serie es "efectiva" si te quedaron como mucho estas repeticiones en reserva (RIR). */
@@ -1022,35 +1024,78 @@
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
 
-  /** Estancamiento de un ejercicio: al menos STALL_MIN_SESSIONS sesiones en las últimas STALL_WEEKS
-   *  semanas sin superar el mejor 1RM estimado de antes. Requiere datos de antes y de después del corte.
-   *  Devuelve { before, after, sessions, best } o null; best es la serie de la marca. */
-  function stallOf(key) {
-    const cut = daysAgoStr(STALL_WEEKS * 7);
-    const e = e1rmSeries(key);
-    const before = e.filter((x) => x.date < cut), after = e.filter((x) => x.date >= cut);
-    if (!before.length || after.length < STALL_MIN_SESSIONS) return null;
-    const best = before.reduce((a, x) => (x.e1rm > a.e1rm ? x : a));
-    const bAfter = Math.max(...after.map((x) => x.e1rm));
-    return bAfter <= best.e1rm ? { before: best.e1rm, after: bAfter, sessions: after.length, best } : null;
+  /** Rango de reps de un ejercicio: el de la rutina si es un rango ("8-12"); si es un número (o un drop
+   *  set "10-10", del que vale el primero), se deduce con REP_RANGE_STEPS. Tiempo ("1 min") → null. */
+  function repRange(text, fallback) {
+    const t = String(text ?? '').trim();
+    const m = /^(\d+)\s*(?:[-–]\s*(\d+))?$/.exec(t);
+    if (t && !m) return null;
+    const a = m ? Number(m[1]) : Number(fallback) || 0, b = m && m[2] ? Number(m[2]) : 0;
+    if (!(a >= 1)) return null;
+    if (b > a) return [a, b];
+    if (a <= REP_RANGE_NONE) return null; // fuerza (5 reps o menos): sin rango inventado, solo si lo escribís ("4-6")
+    return [a, a + REP_RANGE_STEPS.find(([max]) => a <= max)[1]];
   }
 
-  /** Lista de ejercicios estancados. */
-  function stalls() {
-    const out = [];
-    exerciseNames().forEach(({ key, name }) => {
-      const x = stallOf(key);
-      if (x) out.push({ key, name, ...x });
+  /** Lo de una sesión de un ejercicio al peso de trabajo (el más alto con 2+ series hechas; si no, el más
+   *  alto). Solo la parte principal de cada serie. null si no hay series hechas con peso y reps. */
+  function workSets(ex) {
+    const done = ex.sets.filter((st) => st.done && st.weight > 0 && st.reps > 0);
+    if (!done.length) return null;
+    const count = new Map();
+    done.forEach((st) => count.set(st.weight, (count.get(st.weight) || 0) + 1));
+    const ws = [...count.keys()].sort((a, b) => b - a);
+    const w = ws.find((x) => count.get(x) >= 2) ?? ws[0];
+    const at = done.filter((st) => st.weight === w), rirs = at.filter((st) => st.rir != null).map((st) => st.rir);
+    return { weight: w, reps: at.map((st) => st.reps), avg: at.reduce((a, st) => a + st.reps, 0) / at.length,
+             rir: rirs.length ? rirs.reduce((a, b) => a + b, 0) / rirs.length : null, rpe: ex.rpe ?? null };
+  }
+
+  /** Doble progresión de un ejercicio: qué conviene hacer la próxima vez, según las últimas sesiones.
+   *  Devuelve { verdict, weight, range, reps, sessions, why } o null (sin datos, tiempo o datos viejos).
+   *  verdict: 'subir' (tope del rango con reserva: subí un salto y volvé al piso) · 'consolidar' (tope al
+   *  límite: repetí el peso) · 'reps' (mismo peso, buscá +1 rep) · 'progresa' (subiste peso o reps) ·
+   *  'estancado' (varias sesiones iguales con esfuerzo alto: no subas peso) · 'retroceso' (bajan las reps con
+   *  esfuerzo alto: posible fatiga). */
+  function progressionOf(key) {
+    const hist = [];
+    sortedSessions().forEach((s) => {
+      if (!s.finished) return;
+      const ex = s.exercises.find((e) => exKey(e.name) === key);
+      const w = ex && workSets(ex);
+      if (w) hist.push(Object.assign(w, { date: s.date, target: ex.target.reps }));
     });
-    return out;
-  }
-
-  /** Peso mínimo para superar un 1RM estimado con esas reps, en saltos de `step` desde `base`
-   *  (la barra, si la hay). Ej.: stallGoal(80, 8, 2.5) = 65. */
-  function stallGoal(best, reps, step, base = 0) {
-    let w = Math.max(base, base + Math.ceil((best / (1 + reps / 30) - base) / step) * step);
-    while (!(e1rm(w, reps) > best)) w += step;
-    return w;
+    if (hist.length < 2) return null;
+    const cur = hist[hist.length - 1], prev = hist[hist.length - 2];
+    if (cur.date < daysAgoStr(PROG_MAX_DAYS)) return null;
+    const re = [state.routine, ...(state.routine.saved || [])].flatMap((r) => r.days).flatMap((d) => d.exercises).find((e) => exKey(e.name) === key);
+    const range = repRange(re ? re.reps : cur.target, hist[0].reps[0]);
+    if (!range) return null;
+    const [lo, hi] = range;
+    const hard = (x) => (x.rir != null ? x.rir <= 0.5 : x.rpe != null && x.rpe >= 9.5);   // al límite
+    const easy = (x) => (x.rir != null ? x.rir >= 2 : x.rpe != null && x.rpe <= 8);      // con reserva
+    const atTop = (x) => x.reps.every((r) => r >= hi);
+    const out = (verdict, why) => ({ verdict, weight: cur.weight, range, reps: cur.reps, sessions: 0, why,
+                                     effort: cur.rir != null || cur.rpe != null });   // false: sin RIR ni RPE anotados
+    if (cur.weight > prev.weight) {   // subir y quedar debajo del rango = el salto fue grande: repetir antes de seguir
+      return Math.min(...cur.reps) < lo ? out('consolidar', `subiste el peso y quedaste debajo de ${lo} reps`) : out('progresa', 'subiste el peso');
+    }
+    if (cur.weight < prev.weight) return out('progresa', 'bajaste el peso');
+    if (atTop(cur)) {
+      if (hard(cur)) return out('consolidar', 'llegaste al tope del rango, pero al límite');
+      if (easy(cur) || atTop(prev)) return out('subir', 'tope del rango' + (easy(cur) ? ' con reserva' : ' dos veces seguidas'));
+      return out('consolidar', 'primera vez en el tope del rango');
+    }
+    if (cur.avg > prev.avg) return out('reps', 'sumaste reps con el mismo peso');
+    // Mismo peso sin más reps: cuántas sesiones seguidas así (desde la última mejora).
+    let n = 1;
+    for (let i = hist.length - 2; i >= 0 && hist[i].weight === cur.weight && hist[i].avg >= hist[i + 1].avg; i--) n++;
+    const r = out('reps', 'mismo peso y mismas reps');
+    r.sessions = n;
+    if (cur.avg < prev.avg && hard(cur) && hist.length >= 3 && hist[hist.length - 3].weight === cur.weight
+        && prev.avg < hist[hist.length - 3].avg) return Object.assign(r, { verdict: 'retroceso', why: 'bajan las reps dos veces seguidas, al límite' });
+    if (n >= PROG_STALL_SESSIONS && !easy(cur)) return Object.assign(r, { verdict: 'estancado', why: `${n} sesiones con el mismo peso sin sumar reps` });
+    return r;
   }
 
   /** Lunes (YYYY-MM-DD) de la semana de una fecha. */
@@ -1463,8 +1508,8 @@
     addDay, deleteDay, reinsertDay, moveDay,
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
-    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, STALL_MIN_SESSIONS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, stalls, stallOf, stallGoal, weekStart, weeklyStats, muscleSets, sessionMinutes,
+    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
+    e1rm, e1rmSeries, records, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
     mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
