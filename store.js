@@ -1008,6 +1008,42 @@
     return out;
   }
 
+  /** Marcas nuevas de una sesión recién terminada: por ejercicio, si superó el mayor peso, el mejor 1RM
+   *  estimado o el mayor volumen de las otras sesiones. Un ejercicio sin historial previo no cuenta
+   *  (la primera vez no es un récord). [{ name, kinds: ['peso'|'1RM'|'volumen'], weight, e1rm, volume }] */
+  function sessionPRs(id) {
+    const s = find(state.sessions, id);
+    if (!s || !s.finished) return [];
+    const stat = (sess, key) => {
+      let w = 0, e = 0, v = 0, any = false;
+      sess.exercises.forEach((ex) => {
+        if (exKey(ex.name) !== key) return;
+        ex.sets.forEach((st) => {
+          if (!st.done) return;
+          any = true; v += setVolume(st);
+          if ((st.weight || 0) > w) w = st.weight;
+          const x = e1rm(st.weight, st.reps); if (x != null && x > e) e = x;
+        });
+      });
+      return any ? { w, e, v } : null;
+    };
+    const others = sortedSessions().filter((o) => o.finished && o.id !== id);
+    const out = [];
+    s.exercises.forEach((ex) => {
+      const key = exKey(ex.name), now = stat(s, key);
+      if (!now || out.some((o) => o.key === key)) return;
+      const prev = others.map((o) => stat(o, key)).filter(Boolean);
+      if (!prev.length) return;
+      const top = (f) => Math.max(...prev.map(f));
+      const kinds = [];
+      if (now.w > top((x) => x.w)) kinds.push('peso');
+      if (now.e > top((x) => x.e)) kinds.push('1RM');
+      if (now.v > top((x) => x.v)) kinds.push('volumen');
+      if (kinds.length) out.push({ key, name: ex.name, kinds, weight: now.w, e1rm: round2(now.e), volume: round2(now.v) });
+    });
+    return out;
+  }
+
   /** Récords de un ejercicio: mayor peso, mejor 1RM estimado y mayor volumen en una sesión. */
   function records(key) {
     const { points, best } = progress(key);
@@ -1509,7 +1545,7 @@
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
+    e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
     mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
