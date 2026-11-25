@@ -1544,13 +1544,8 @@
     addDay, deleteDay, reinsertDay, moveDay,
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
-<<<<<<< HEAD
-    BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, STALL_WEEKS, STALL_MIN_SESSIONS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, sessionPRs, stalls, stallOf, stallGoal, weekStart, weeklyStats, muscleSets, sessionMinutes,
-=======
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
->>>>>>> origin/main
+    e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
     mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
