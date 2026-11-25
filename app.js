@@ -662,11 +662,12 @@
   /** Cuenta las series: con ✓, cargadas sin ✓ (se pueden guardar) y vacías (sin reps).
    *  "where" = "Press inclinado (3) · Aperturas (4)": dónde quedaron las cargadas sin ✓. */
   function countSets(s) {
-    const c = { done: 0, loaded: 0, empty: 0 }, by = [];
+    const c = { done: 0, loaded: 0, empty: 0, started: 0, untouched: [] }, by = [];
     s.exercises.forEach((ex) => {
       let n = 0;
       ex.sets.forEach((st) => { if (st.done) c.done++; else if (markable(ex, st)) n++; else c.empty++; });
       if (n) { c.loaded += n; by.push(`${ex.name} (${n})`); }
+      if (!ex.sets.some((st) => st.done)) { if (n) c.untouched.push(ex.name); } else c.started += n;   // sin ninguna ✓ = no empezado
     });
     c.where = by.slice(0, 4).join(' · ') + (by.length > 4 ? ` y ${by.length - 4} ejercicio(s) más` : '');
     return c;
@@ -680,12 +681,23 @@
     const s = currentSession();
     if (!s || finishing) return;
     const editing = !!ui.editId;
-    const { done, loaded, empty, where } = countSets(s);
+    const { done, loaded, empty, where, started, untouched } = countSets(s);
     const emptyTxt = empty ? ` Las ${empty} vacías (sin reps) no se guardan.` : '';
     const loadedTxt = `Sin ✓: ${where}. Revisá si las hiciste: pueden tener los números que la app completó sola.${emptyTxt}`;
     let choice = 'save';
 
-    if (loaded && done) {
+    if (loaded && done && untouched.length) {
+      // Ejercicios sin ninguna ✓: lo más probable es que no se hicieron. Guardarlos como hechos con los
+      // números que completó la app inventaría datos, así que la opción principal los deja afuera.
+      choice = await askFinish(`Hay ${untouched.length} ejercicio(s) sin ninguna ✓`,
+        `${untouched.join(', ')}. Si no los hiciste, quedan anotados como "sin hacer" y no cuentan en tu progreso.`
+        + (started ? ` En los que sí empezaste quedan ${started} serie(s) sin ✓.` : '') + emptyTxt, [
+        { label: started ? `Guardar sin esos ejercicios (y las ${started} series de los otros)` : 'Guardar sin esos ejercicios', value: 'started', cls: 'primary' },
+        ...(started ? [{ label: done === 1 ? 'Guardar solo la serie con ✓' : `Guardar solo las ${done} con ✓`, value: 'save' }] : []),
+        { label: `Los hice: guardar las ${done + loaded} series`, value: 'all' },
+        { label: 'Volver a la sesión', value: null },
+      ]);
+    } else if (loaded && done) {
       choice = await askFinish(`Hay ${loaded} serie(s) sin ✓`, `Marcaste ${done} con ✓. ${loadedTxt}`, [
         { label: `Guardar las ${done + loaded} series`, value: 'all', cls: 'primary' },
         { label: done === 1 ? 'Guardar solo la serie con ✓' : `Guardar solo las ${done} con ✓`, value: 'save' },
@@ -721,10 +733,12 @@
       go(editing ? 'history' : 'train');
       return;
     }
-    if (choice === 'all') {
-      const lines = live.exercises.flatMap((ex) => warnings(live, ex, ex.sets.filter((st) => !st.done && markable(ex, st))));
+    if (choice === 'all' || choice === 'started') {
+      // 'started': solo en los ejercicios que tienen alguna ✓
+      const exs = live.exercises.filter((ex) => choice === 'all' || ex.sets.some((st) => st.done));
+      const lines = exs.flatMap((ex) => warnings(live, ex, ex.sets.filter((st) => !st.done && markable(ex, st))));
       if (!okToMark(lines)) return;
-      live.exercises.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
+      exs.forEach((ex) => { ex.sets.forEach((st) => { if (!st.done && markable(ex, st)) st.done = true; }); syncEx(ex); });
     }
     S.finishSession(live.id);
     S.restClear();
@@ -775,6 +789,7 @@
         </div>
         <p class="muted">Volumen: ${fmt(vol)} ${unit()}${S.sessionMinutes(s) != null ? ' · ' + S.sessionMinutes(s) + ' min' : ''}${s.bodyweight ? ' · peso corporal ' + fmt(s.bodyweight) + ' ' + unit() : ''}</p>
         ${exs}
+        ${s.skipped ? `<div class="hist-ex muted"><span class="warn-txt">Sin hacer (${s.skipped.length} de ${s.skipped.length + s.exercises.length}):</span> ${s.skipped.map(esc).join(', ')}</div>` : ''}
         ${sel ? '' : `<div class="row" style="margin-top:10px">
           <button data-act="edit-session">${s.finished ? 'Editar' : 'Continuar'}</button>
           <button data-act="del-session" class="danger">Borrar</button>
@@ -1085,7 +1100,7 @@
         <select id="p-day" data-f="progday">${days.map((d) =>
           `<option value="${esc(d.id)}" ${d.id === ui.progDay ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
         ${msg ? `<p class="muted chart-empty">${msg}</p>` : '<div class="svgchart" data-chart="day"></div>'}
-        <p class="muted">Volumen de cada sesión = suma de peso × reps (incluye la parte drop).</p>
+        <p class="muted">Volumen de cada sesión = suma de peso × reps (incluye la parte drop).${pts.some((p) => p.skipped.length) ? ' <span class="warn-txt">■</span> Barra naranja = sesión en la que quedaron ejercicios sin hacer: su volumen es más bajo por eso, no por haber retrocedido.' : ''}</p>
       </div>`;
   }
 
@@ -1174,8 +1189,8 @@
         const pts = S.dayVolumes(ui.progDay);
         el.innerHTML = svgChart({
           width, labels: pts.map((p) => fmtShort(p.date)), bars: pts.map((p) => p.volume),
-          barName: `Volumen de la sesión (${unit()})`,
-          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.volume)} ${unit()}`),
+          barName: `Volumen de la sesión (${unit()})`, barCls: pts.map((p) => (p.skipped.length ? 'inc' : '')),
+          titles: pts.map((p) => `${fmtShort(p.date)}: ${fmt(p.volume)} ${unit()}` + (p.skipped.length ? ` · sin hacer: ${p.skipped.join(', ')}` : '')),
         });
       } else {
         const list = S.cycles().list;
