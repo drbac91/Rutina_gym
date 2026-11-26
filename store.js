@@ -1178,6 +1178,23 @@
     }));
   }
 
+  /** Datos para el resumen que se manda al profe: la semana de hoy si ya hay sesiones terminadas, y si no la última
+   *  semana con sesiones. null si no hay ninguna. Sin peso corporal ni nada fuera de lo entrenado. */
+  function weekReport() {
+    const fin = sortedSessions().filter((s) => s.finished);
+    if (!fin.length) return null;
+    const cur = weekStart(todayStr());
+    const week = fin.some((s) => weekStart(s.date) === cur) ? cur : weekStart(fin[fin.length - 1].date);
+    const sessions = fin.filter((s) => weekStart(s.date) === week).map((s) => ({
+      dayName: s.dayName || 'Sesión', date: s.date, minutes: sessionMinutes(s), skipped: s.skipped || [],
+      sets: s.exercises.reduce((n, ex) => n + ex.sets.filter((x) => x.done).length, 0),
+    }));
+    const stalled = exerciseNames().map(({ key, name }) => ({ name, p: progressionOf(key) }))
+      .filter((x) => x.p && (x.p.verdict === 'estancado' || x.p.verdict === 'retroceso'))
+      .map((x) => ({ name: x.name, verdict: x.p.verdict, weight: x.p.weight, sessions: x.p.sessions }));
+    return { week, current: week === cur, sessions, stalled };
+  }
+
   /** Músculos de cada ejercicio según la rutina ACTUAL (por nombre normalizado). */
   function muscleMap() {
     const m = new Map();
@@ -1603,7 +1620,7 @@
     addExercise, deleteExercise, reinsertExercise, moveExercise, moveExerciseTo, moveExerciseToDay,
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
-    e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
+    e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, weekReport, muscleSets, sessionMinutes,
     mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSessionExtra, pendingFor, skipPatterns, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
