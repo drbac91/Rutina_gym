@@ -198,6 +198,7 @@
       dayId: String(s.dayId || ''),
       dayName: String(s.dayName || ''),
       ...(s.routineId ? { routineId: String(s.routineId) } : {}),   // rutina con la que se hizo (opcional)
+      ...(s.extra === true ? { extra: true } : {}),   // complemento de otra sesión: no cuenta como día del ciclo (opcional)
       finished: s.finished !== false,
       exercises: (Array.isArray(s.exercises) ? s.exercises : []).map((ex) => {
         const t = (ex && ex.target) || {};
@@ -962,7 +963,7 @@
       acc = new Set(); tramo = [];
     };
     sortedSessions().forEach((s) => {
-      if (!s.finished) return;
+      if (!s.finished || s.extra) return;                  // un complemento no ocupa el lugar de un día
       const Rs = routineOf(s);
       if (tramo.length && Rs !== R) close(true);           // cambio de rutina: el ciclo se corta, no es incompleto
       R = Rs;
@@ -1277,6 +1278,13 @@
     commit();
   }
 
+  /** Marca (o desmarca) una sesión como complemento de otra: no cuenta como día del ciclo. */
+  function setSessionExtra(s, on) {
+    delete s.extra;
+    if (on) s.extra = true;
+    commit();
+  }
+
   /** Guarda el RIR de una serie (vacío = se borra). */
   /** RPE del ejercicio (1 a 10, pasos de 0,5); vacío lo quita. */
   function setExRpe(ex, rpe) {
@@ -1546,7 +1554,7 @@
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
-    mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSetRir, setExRpe, normMuscles,
+    mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSessionExtra, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession, reinsertSession,

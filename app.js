@@ -464,6 +464,8 @@
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
+      <label class="opt"><span><b>Es un complemento</b><small>Ejercicios que quedaron pendientes de otra sesión. No cuenta como un día más del ciclo.</small></span>
+        <input type="checkbox" data-f="extra"${s.extra ? ' checked' : ''}></label>
       <div class="sess-bar" id="sess-bar">${sessBarHtml(s)}</div>
       ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.' + (S.opt('rir') ? ' <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.' : ''))}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
@@ -2311,6 +2313,11 @@
     if (el.dataset.f === 'date') {
       const s = currentSession();
       if (s && el.value) { s.date = el.value; S.commit(); }
+      return;
+    }
+    if (el.dataset.f === 'extra') {
+      const s = currentSession();
+      if (s) { S.setSessionExtra(s, el.checked); toast(el.checked ? 'Esta sesión no cuenta como día del ciclo' : 'Vuelve a contar como día del ciclo'); }
       return;
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; S.setPref('progKey', el.value); render(); return; }
