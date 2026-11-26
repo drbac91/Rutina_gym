@@ -792,7 +792,7 @@
       <div class="sharebar"><span><b>${sel.size}</b> elegido(s)</span>
         <button class="primary" data-act="share-go" ${sel.size ? '' : 'disabled'}>Enviar</button>
         <button data-act="share-cancel">Cancelar</button></div>`
-      : '<button class="quiet" data-act="share-start">Compartir días por WhatsApp…</button>';
+      : '<div class="row"><button class="quiet" data-act="share-start">Compartir días por WhatsApp…</button><button class="quiet" data-act="share-week">Resumen de la semana</button></div>';
     return '<h1>Historial</h1>' + remind + bar + list.map((s) => {
       const vol = s.exercises.reduce((a, ex) => a + ex.sets.filter((x) => x.done)
         .reduce((b, x) => b + S.setVolume(x), 0), 0);
@@ -844,8 +844,8 @@
     }).join('\n\n');
   }
 
-  async function shareSessions() {
-    const text = shareText(ui.sel);
+  /** Manda un texto por el menú de compartir (WhatsApp) o, si no hay, lo copia. */
+  async function sendText(text) {
     if (!text) return;
     if (navigator.share) {
       try { await navigator.share({ text }); ui.sel = null; render(); return; }
@@ -853,6 +853,29 @@
     }
     try { await navigator.clipboard.writeText(text); toast('Texto copiado. Pegalo en WhatsApp.'); ui.sel = null; render(); }
     catch (err) { toast('No se pudo compartir ni copiar en este navegador.'); }
+  }
+  const shareSessions = () => sendText(shareText(ui.sel));
+
+  /** Resumen corto de la semana para mandarle al profe: días hechos, ejercicios sin hacer y estancados. */
+  function weekText() {
+    const r = S.weekReport();
+    if (!r) return '';
+    const end = new Date(r.week + 'T00:00'); end.setDate(end.getDate() + 6);
+    const endStr = end.getFullYear() + '-' + String(end.getMonth() + 1).padStart(2, '0') + '-' + String(end.getDate()).padStart(2, '0');
+    const sets = r.sessions.reduce((n, s) => n + s.sets, 0);
+    const lines = [`*Resumen de la semana* (${fmtShort(r.week)} al ${fmtShort(endStr)})`,
+      `Entrené ${r.sessions.length} ${r.sessions.length === 1 ? 'día' : 'días'} · ${sets} series`];
+    r.sessions.forEach((s) => {
+      lines.push(`• ${s.dayName} · ${fmtDate(s.date)}${s.minutes != null ? ' · ' + s.minutes + ' min' : ''}`);
+      if (s.skipped.length) lines.push(`   Sin hacer: ${s.skipped.join(', ')}`);
+    });
+    if (r.stalled.length) {
+      lines.push('', 'Para revisar:');
+      r.stalled.forEach((x) => lines.push(x.verdict === 'estancado'
+        ? `• ${x.name}: ${x.sessions} sesiones con ${fmt(x.weight)} ${unit()} sin sumar reps`
+        : `• ${x.name}: bajan las reps con ${fmt(x.weight)} ${unit()}`));
+    }
+    return lines.join('\n');
   }
 
   /* ======================================================================
@@ -1985,6 +2008,7 @@
       case 'share-start': ui.sel = new Set(); render(); break;
       case 'share-cancel': ui.sel = null; render(); break;
       case 'share-go': shareSessions(); break;
+      case 'share-week': sendText(weekText()); break;
       case 'edit-session': {
         const sid = btn.closest('[data-sid]').dataset.sid;
         const s = S.find(S.state.sessions, sid);
