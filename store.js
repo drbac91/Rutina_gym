@@ -1278,11 +1278,25 @@
     commit();
   }
 
-  /** Marca (o desmarca) una sesión como complemento de otra: no cuenta como día del ciclo. */
+  /** Marca (o desmarca) una sesión como complemento de otra: no cuenta como día del ciclo. Al marcarla,
+   *  si la última sesión terminada de ese día dejó ejercicios "sin hacer" (`skipped`), quedan en la sesión
+   *  solo esos (los demás se quitan si no tienen series hechas). Devuelve los nombres pendientes (o null
+   *  si no hay nada anotado y la sesión quedó como estaba). Desmarcar no vuelve a poner lo quitado. */
   function setSessionExtra(s, on) {
     delete s.extra;
-    if (on) s.extra = true;
+    let pending = null;
+    if (on) {
+      s.extra = true;
+      const day = { id: s.dayId, name: s.dayName };
+      const prev = sortedSessions().filter((o) => o.finished && !o.extra && o.id !== s.id && isDay(o, day) && (o.skipped || []).length).pop();
+      const keys = new Set(prev ? prev.skipped.map(exKey) : []);
+      if (keys.size && s.exercises.some((ex) => keys.has(exKey(ex.name)))) {
+        s.exercises = s.exercises.filter((ex) => keys.has(exKey(ex.name)) || ex.sets.some((st) => st.done));
+        pending = s.exercises.filter((ex) => keys.has(exKey(ex.name))).map((ex) => ex.name);
+      }
+    }
     commit();
+    return pending;
   }
 
   /** Guarda el RIR de una serie (vacío = se borra). */

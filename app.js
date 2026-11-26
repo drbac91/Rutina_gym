@@ -2317,7 +2317,13 @@
     }
     if (el.dataset.f === 'extra') {
       const s = currentSession();
-      if (s) { S.setSessionExtra(s, el.checked); toast(el.checked ? 'Esta sesión no cuenta como día del ciclo' : 'Vuelve a contar como día del ciclo'); }
+      if (s) {
+        const pend = S.setSessionExtra(s, el.checked);
+        toast(!el.checked ? 'Vuelve a contar como día del ciclo'
+          : pend ? `Quedaron los ${pend.length} ejercicio(s) pendientes. No cuenta como día del ciclo`
+          : 'Esta sesión no cuenta como día del ciclo');
+        if (pend) render();
+      }
       return;
     }
     if (el.dataset.f === 'prog') { ui.progKey = el.value; S.setPref('progKey', el.value); render(); return; }
