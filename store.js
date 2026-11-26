@@ -630,6 +630,78 @@
     return true;
   }
 
+  /* ---------- ajustes de la rutina desde un texto (WhatsApp del profe) ---------- */
+
+  const ADJ_ABBR = { bp: 'banco plano' };   // abreviaturas conocidas: se expanden antes de buscar el ejercicio
+
+  /** Interpreta un texto con ajustes ("Sentadilla 3x3 80", "Inclinado barra 65 3x4") sin tocar nada.
+   *  Solo entiende UNA forma por renglón: series×reps y un peso (en cualquier orden). Todo lo demás
+   *  (90x1 75x5, "3s pausa", varios bloques) NO se adivina: va a `manual` con el motivo.
+   *  Un renglón "Día 2" (o "Día 2 …") fija el día de los renglones siguientes hasta un renglón vacío.
+   *  Devuelve { changes:[{dayId,dayName,exId,name,line,before,after,same}], manual:[{line,why}] }. */
+  function parseAdjustments(text) {
+    const out = { changes: [], manual: [] };
+    let hint = null;
+    String(text == null ? '' : text).split(/\r?\n/).forEach((raw) => {
+      let line = raw.trim();
+      if (!line) { hint = null; return; }
+      const orig = line;
+      const dm = line.match(/^d[ií]a\s*(\d+)\b[\s:.\-\u2013]*(.*)$/i);
+      if (dm) { hint = dm[1]; line = dm[2].trim(); if (!line) return; }
+      const bad = (why) => out.manual.push({ line: orig, why });
+      const toks = line.split(/\s+/);
+      const at = toks.findIndex((t) => /^\d/.test(t));
+      if (at <= 0) return bad('no empieza con el nombre del ejercicio');
+      const nums = toks.slice(at);
+      const isSR = (t) => /^\d{1,2}x\d{1,3}$/i.test(t) && Number(t.split(/x/i)[0]) >= 1 && Number(t.split(/x/i)[0]) <= 10;
+      const isW = (t) => /^\d+([.,]\d+)?(kg)?$/i.test(t);
+      let sr = null, w = null;
+      if (nums.length === 1 && isSR(nums[0])) sr = nums[0];
+      else if (nums.length === 2 && isSR(nums[0]) && isW(nums[1])) { sr = nums[0]; w = nums[1]; }
+      else if (nums.length === 2 && isW(nums[0]) && isSR(nums[1])) { sr = nums[1]; w = nums[0]; }
+      else return bad('no lo interpreto, poné a mano');
+      const [sets, reps] = sr.toLowerCase().split('x').map(Number);
+      const weight = w == null ? null : parseNum(w.replace(/kg$/i, ''));
+      // Día elegido por "Día N"
+      let days = state.routine.days;
+      if (hint != null) {
+        days = days.filter((d) => new RegExp('^dia\\s*' + hint + '(?!\\d)').test(normName(d.name)));
+        if (!days.length) return bad('no encontré el día ' + hint);
+      }
+      const q = toks.slice(0, at).map((t) => ADJ_ABBR[normName(t)] || t).join(' ');
+      const qn = normName(q), qt = qn.split(' ');
+      const all = days.flatMap((d) => d.exercises.map((e) => ({ d, e })));
+      let hits = all.filter((x) => normName(x.e.name) === qn);
+      if (!hits.length) {
+        hits = all.filter((x) => { const t = normName(x.e.name).split(' '); return qt.every((a) => t.some((b) => b.startsWith(a))); });
+      }
+      if (!hits.length) return bad('no encontré el ejercicio "' + toks.slice(0, at).join(' ') + '"');
+      if (hits.length > 1) return bad('puede ser: ' + hits.map((x) => x.d.name + ' · ' + x.e.name).join(' / ') + '. Poné "Día N" arriba');
+      const { d, e } = hits[0];
+      const before = { sets: e.sets, reps: e.reps, weight: e.targetWeight };
+      const after = { sets, reps: String(reps), weight: weight == null ? e.targetWeight : weight };
+      out.changes.push({ dayId: d.id, dayName: d.name, exId: e.id, name: e.name, line: orig, before, after,
+        same: before.sets === after.sets && before.reps === after.reps && before.weight === after.weight });
+    });
+    return out;
+  }
+
+  /** Aplica los cambios de `parseAdjustments` (los que no son iguales a lo que ya estaba). Deja una copia antes. */
+  function applyAdjustments(changes) {
+    const todo = changes.filter((c) => !c.same);
+    if (!todo.length) return 0;
+    backup('ajustes');
+    let n = 0;
+    todo.forEach((c) => {
+      const day = find(state.routine.days, c.dayId), ex = day && find(day.exercises, c.exId);
+      if (!ex) return;
+      ex.sets = c.after.sets; ex.reps = c.after.reps; ex.targetWeight = c.after.weight;
+      n++;
+    });
+    if (n) commit();
+    return n;
+  }
+
   /* ---------- ejercicios unidos (alias) ---------- */
 
   /** Une el ejercicio `fromKey` con `toKey`: el historial viejo se ve junto con el nuevo. No cambia sesiones.
@@ -1628,7 +1700,7 @@
     exerciseNames, progress,
     exportJSON, parseImport, replaceAll, resetRoutine, exportCSV, markExported, sessionsSinceExport, getPref, setPref, opt, setOpt, resetHelp, restStart, restClear, restGet,
     backup, listBackups, restoreBackup, setRoutine, upsertSession, removeSession, resetToSeed,
-    swapExercise, parseRoutineImport, replaceRoutine, savedRoutines, useSavedRoutine, deleteSavedRoutine,
+    swapExercise, parseAdjustments, applyAdjustments, parseRoutineImport, replaceRoutine, savedRoutines, useSavedRoutine, deleteSavedRoutine,
     /** Forma normalizada (para que cloud.js compare CONTENIDO, sin importar orden ni campos vacíos). */
     canonSession: (x) => { const { updatedAt, ...rest } = normSession(x); return rest; },
     canonRoutine: (r) => normalize({ routine: r }).routine,
