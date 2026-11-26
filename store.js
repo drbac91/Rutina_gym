@@ -42,6 +42,7 @@
   // Rango deducido de un número de reps: hasta 5 → +3 (3 → 3-6), hasta 9 → +4 (8 → 8-12), hasta 14 → +3, más → +5.
   const REP_RANGE_NONE = 5;
   const REP_RANGE_STEPS = [[9, 4], [14, 3], [Infinity, 5]];
+  const SKIP_ALERT_OF = 4, SKIP_ALERT_MIN = 3;   // aviso: sin hacer en 3 de las últimas 4 sesiones de su día
   const PROG_STALL_SESSIONS = 3;   // sesiones seguidas con el mismo peso sin más reps para hablar de estancamiento
   const PROG_MAX_DAYS = 35;        // sin entrenarlo en este tiempo, no se opina (los datos son viejos)
   /** Cuánto cuenta una serie para cada músculo SECUNDARIO (el principal cuenta 1). */
@@ -959,7 +960,7 @@
       const unknown = !R || !days.some((d) => acc.has(d.id));
       const missing = unknown ? [] : days.filter((d) => !acc.has(d.id)).map((d) => d.name);
       list.push({ n: list.length + 1, start: tramo[0].date, end: tramo[tramo.length - 1].date, sessions: tramo.length,
-                  volume, avg: round2(volume / tramo.length), complete: !changed && !missing.length, missing, old, changed, unknown });
+                  volume, avg: round2(volume / tramo.length), complete: !changed && !missing.length, missing, old, changed, unknown, ids: tramo.map((x) => x.id) });
       acc = new Set(); tramo = [];
     };
     sortedSessions().forEach((s) => {
@@ -979,6 +980,7 @@
       current: mine ? curDays.filter((d) => acc.has(d.id)).length : 0, total, list,
       missing: mine ? curDays.filter((d) => !acc.has(d.id)).map((d) => d.name) : [],   // lo que falta del ciclo en curso
       since: mine ? tramo[0].date : null,
+      open: mine ? tramo.map((x) => x.id) : [],            // sesiones del ciclo en curso
     };
   }
 
@@ -1278,18 +1280,36 @@
     commit();
   }
 
-  /** Marca (o desmarca) una sesión como complemento de otra: no cuenta como día del ciclo. Al marcarla,
-   *  si la última sesión terminada de ese día dejó ejercicios "sin hacer" (`skipped`), quedan en la sesión
-   *  solo esos (los demás se quitan si no tienen series hechas). Devuelve los nombres pendientes (o null
-   *  si no hay nada anotado y la sesión quedó como estaba). Desmarcar no vuelve a poner lo quitado. */
+  /** Ejercicios que la sesión `s` puede completar como complemento: los "sin hacer" (`skipped`) de la última
+   *  sesión del mismo día, solo si esa sesión es del ciclo en curso o es el último día del ciclo anterior
+   *  y `s` es la 1ª o 2ª del ciclo nuevo. Los que ya completó otro complemento no vuelven a salir.
+   *  Devuelve { from, names } o null. */
+  function pendingFor(s) {
+    const c = cycles(), last = c.list[c.list.length - 1];
+    const ids = new Set(c.open || []);
+    if (last && ids.size < 2) ids.add(last.ids[last.ids.length - 1]);
+    const day = { id: s.dayId, name: s.dayName };
+    const all = sortedSessions().filter((o) => o.finished && o.id !== s.id);
+    const prev = all.filter((o) => !o.extra && ids.has(o.id) && isDay(o, day) && (o.skipped || []).length).pop();
+    if (!prev) return null;
+    const done = new Set();
+    all.slice(all.indexOf(prev) + 1).filter((o) => o.extra && isDay(o, day)).forEach((o) =>
+      o.exercises.forEach((ex) => { if (ex.sets.some((st) => st.done)) done.add(exKey(ex.name)); }));
+    const names = prev.skipped.filter((n) => !done.has(exKey(n)));
+    return names.length ? { from: prev, names } : null;
+  }
+
+  /** Marca (o desmarca) una sesión como complemento de otra: no cuenta como día del ciclo. Al marcarla
+   *  quedan en la sesión solo los ejercicios pendientes (`pendingFor`); los demás se quitan si no tienen
+   *  series hechas. Devuelve los nombres pendientes (o null si no había nada y la sesión quedó como estaba).
+   *  Desmarcar no vuelve a poner lo quitado. */
   function setSessionExtra(s, on) {
     delete s.extra;
     let pending = null;
     if (on) {
       s.extra = true;
-      const day = { id: s.dayId, name: s.dayName };
-      const prev = sortedSessions().filter((o) => o.finished && !o.extra && o.id !== s.id && isDay(o, day) && (o.skipped || []).length).pop();
-      const keys = new Set(prev ? prev.skipped.map(exKey) : []);
+      const p = pendingFor(s);
+      const keys = new Set(p ? p.names.map(exKey) : []);
       if (keys.size && s.exercises.some((ex) => keys.has(exKey(ex.name)))) {
         s.exercises = s.exercises.filter((ex) => keys.has(exKey(ex.name)) || ex.sets.some((st) => st.done));
         pending = s.exercises.filter((ex) => keys.has(exKey(ex.name))).map((ex) => ex.name);
@@ -1297,6 +1317,22 @@
     }
     commit();
     return pending;
+  }
+
+  /** Ejercicios que se vienen salteando: "sin hacer" en SKIP_ALERT_MIN de las últimas SKIP_ALERT_OF
+   *  sesiones de su día (los complementos no cuentan). [{ name, count, of }] */
+  function skipPatterns() {
+    const fin = sortedSessions().filter((s) => s.finished && !s.extra);
+    const out = new Map();
+    fin.forEach((s) => (s.skipped || []).forEach((n) => {
+      const k = exKey(n);
+      if (out.has(k)) return;
+      const day = { id: s.dayId, name: s.dayName };
+      const recent = fin.filter((o) => isDay(o, day)).slice(-SKIP_ALERT_OF);
+      const count = recent.filter((o) => (o.skipped || []).some((x) => exKey(x) === k)).length;
+      out.set(k, { name: n, count, of: recent.length });
+    }));
+    return [...out.values()].filter((x) => x.count >= SKIP_ALERT_MIN);
   }
 
   /** Guarda el RIR de una serie (vacío = se borra). */
@@ -1568,7 +1604,7 @@
     exKey, joinExercises, splitExercise, aliasesOf, normAliases,
     BARS, BRICK_KG, MUSCLES, LEGACY_MUSCLES, BACK_MUSCLES, E1RM_MAX_REPS, SECONDARY_MUSCLE_FACTOR, EFFECTIVE_RIR_MAX,
     e1rm, e1rmSeries, records, sessionPRs, repRange, progressionOf, PROG_STALL_SESSIONS, weekStart, weeklyStats, muscleSets, sessionMinutes,
-    mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSessionExtra, setSetRir, setExRpe, normMuscles,
+    mergeRemoteExtras, bodyweightSeries, bodyweightAt, setBodyweight, deleteBodyweight, normBodyweights, setSessionBodyweight, setSessionExtra, pendingFor, skipPatterns, setSetRir, setExRpe, normMuscles,
     isDropExercise, blankDrop, setVolume, groupRuns, toggleSuperset, barTotal, sideOf, setSessionBar, barsUsed,
     bricksTotal, bricksOf, getExerciseComment, setExerciseComment, sessionVolume, dayVolumes, dayStats, cycles,
     lastEntry, startSession, finishSession, deleteSession, reinsertSession,
