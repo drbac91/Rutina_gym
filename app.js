@@ -1308,10 +1308,42 @@
       <h1>Rutina</h1>
       <p class="muted">Cambiar la rutina no modifica tu historial. El historial se une por nombre de ejercicio: si renombrás uno, el historial viejo queda con el nombre anterior (si te pasa, unilos en Progreso con "Unir…").</p>
       ${nameList()}
+      ${adjustCard()}
       ${pending ? `<div class="note revisar"><b>${pending} nota(s) para revisar.</b> Buscá las marcadas en amarillo.</div>` : ''}
       ${backBanner()}
       ${days.map((d, di) => dayCard(d, di, days.length)).join('')}
       <button class="block primary" data-act="add-day">+ Agregar día</button>`;
+  }
+
+  /** Caja para pegar los ajustes que manda el profe por WhatsApp ("Sentadilla 3x3 80"). */
+  function adjustCard() {
+    if (!ui.adjOpen) return '<button class="block" style="margin-bottom:12px" data-act="toggle-adj">Pegar ajustes del profe</button>';
+    return `<div class="card stack">
+      <h2>Ajustes del profe</h2>
+      <p class="muted">Pegá el mensaje. Entiendo renglones como <b>Sentadilla 3x3 80</b> o <b>Inclinado barra 65 3x4</b> (series×reps y peso). Si no aclara el día, escribí <b>Día 2</b> arriba. Lo demás lo dejo para que lo pongas a mano.</p>
+      <textarea id="adj-text" rows="7" spellcheck="false" autocapitalize="off" autocorrect="off">${esc(ui.adjText || '')}</textarea>
+      <button class="primary block" data-act="apply-adj">Ver y aplicar cambios</button>
+      <button class="block" data-act="toggle-adj">Cancelar</button></div>`;
+  }
+
+  /** Muestra qué cambiaría y, si se confirma, lo aplica. Lo que no entiende queda en la caja para hacerlo a mano. */
+  function applyAdjustText(text) {
+    const r = S.parseAdjustments(text);
+    const todo = r.changes.filter((c) => !c.same);
+    const info = (x) => `${x.sets}×${x.reps}${x.weight != null ? ' · ' + fmt(x.weight) + ' ' + unit() : ''}`;
+    const manual = r.manual.map((m) => `• ${m.line}\n   (${m.why})`).join('\n');
+    if (!todo.length) {
+      alert(r.manual.length ? 'No pude aplicar nada solo. Para poner a mano:\n\n' + manual
+        : r.changes.length ? 'Todo eso ya estaba así en tu rutina.' : 'No encontré ningún ajuste en el texto.');
+      ui.adjText = text; render(); return;
+    }
+    const lines = todo.map((c) => `• ${c.dayName} · ${c.name}: ${info(c.before)} → ${info(c.after)}`).join('\n');
+    if (!confirm(`Voy a cambiar ${todo.length} ejercicio(s):\n\n${lines}${r.manual.length ? '\n\nQuedan para poner a mano:\n' + manual : ''}\n\nTu historial NO se modifica y queda una copia por si querés deshacer.\n\n¿Aplicar?`)) { ui.adjText = text; render(); return; }
+    S.applyAdjustments(todo);
+    ui.adjText = r.manual.map((m) => m.line).join('\n');
+    ui.adjOpen = !!ui.adjText;
+    toast(r.manual.length ? 'Listo ✓ — el resto queda abajo para poner a mano' : 'Ajustes aplicados ✓');
+    render();
   }
 
   /** Aviso de arriba: ejercicios que todavía dicen "Espalda" (lista vieja de músculos). */
@@ -1599,7 +1631,7 @@
   const BACKUP_WHY = {
     import: 'antes de restaurar un backup', rutina: 'antes de cambiar la rutina', 'reset-routine': 'antes de volver a la rutina de ejemplo',
     'borrar rutina': 'antes de borrar una rutina guardada', cuenta: 'antes de entrar con otra cuenta', nube: 'antes de usar la rutina de la nube', recuperar: 'antes de recuperar otra copia',
-    'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio', músculos: 'antes de revisar "Espalda" en la rutina',
+    'borrar sesión': 'antes de borrar una sesión', 'borrar día': 'antes de borrar un día', 'borrar ejercicio': 'antes de borrar un ejercicio', músculos: 'antes de revisar "Espalda" en la rutina', ajustes: 'antes de aplicar ajustes del profe',
   };
   /** "copia del 20 oct, 21:40" (las copias de versiones viejas no tienen fecha). */
   const copyName = (at) => (at ? 'copia del ' + new Date(at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'copia anterior');
@@ -2208,6 +2240,8 @@
         break;
       }
       case 'import-routine-file': document.getElementById('file-routine').click(); break;
+      case 'toggle-adj': ui.adjOpen = !ui.adjOpen; ui.adjText = ''; render(); break;
+      case 'apply-adj': applyAdjustText(document.getElementById('adj-text').value); break;
       case 'toggle-paste': ui.pasteOpen = !ui.pasteOpen; render(); break;
       case 'apply-paste': applyRoutineText(document.getElementById('paste-json').value); break;
       case 'use-routine': {
