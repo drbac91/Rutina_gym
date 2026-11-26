@@ -298,6 +298,13 @@
     });
   }
 
+  /** Aviso si el ejercicio se viene salteando seguido (solo en la sesión en curso). */
+  function skipNote(s, ex) {
+    if (s.finished) return '';
+    const k = S.exKey(ex.name), p = S.skipPatterns().find((x) => S.exKey(x.name) === k);
+    return p ? `<div class="note revisar"><b>Lo vas salteando:</b> quedó sin hacer en ${p.count} de las últimas ${p.of} sesiones. ¿Lo cambiás o lo sacás de la rutina?</div>` : '';
+  }
+
   /** Tarjeta de un ejercicio normal. */
   function exerciseCard(s, ex, i) {
     return `
@@ -305,7 +312,7 @@
         <div class="ex-head"><h3>${esc(ex.name)}${ex.drop ? helpBtn('drop') : ''}</h3><span class="target">${targetText(ex)}</span></div>
         ${swapNote(ex)}${exerciseNote(s, i)}
         <p class="prev">${prevText(s, ex)}</p>
-        ${stallNote(s, i)}
+        ${stallNote(s, i)}${skipNote(s, ex)}
         ${barPicker(ex, i)}
         ${ex.drop ? helpBox('drop', '↳ <b>Drop set:</b> cada serie tiene una segunda parte sin descanso, con menos peso.') : ''}
         <div class="set-head"><span>#</span><span>${weightHead(ex)}</span><span>${S.opt('rir') ? 'reps · RIR' : 'reps'}</span><span></span><span></span></div>
@@ -464,8 +471,8 @@
         <label for="s-date">Fecha</label>
         <input type="date" id="s-date" data-f="date" value="${esc(s.date)}">
       </div>
-      <label class="opt"><span><b>Es un complemento</b><small>Ejercicios que quedaron pendientes de otra sesión. No cuenta como un día más del ciclo.</small></span>
-        <input type="checkbox" data-f="extra"${s.extra ? ' checked' : ''}></label>
+      ${s.extra || (!s.finished && S.pendingFor(s)) ? `<label class="opt"><span><b>Es un complemento</b><small>Ejercicios que quedaron sin hacer en este ciclo. No cuenta como un día más.</small></span>
+        <input type="checkbox" data-f="extra"${s.extra ? ' checked' : ''}></label>` : ''}
       <div class="sess-bar" id="sess-bar">${sessBarHtml(s)}</div>
       ${helpBox('session', 'Marcá con ✓ cada serie que terminás. Al final te pregunto qué hacer con las que queden sin ✓.' + (S.opt('rir') ? ' <b>RIR</b> (opcional) = cuántas repeticiones más podrías haber hecho.' : ''))}
       ${exCards || '<p class="empty">Esta sesión no tiene ejercicios.</p>'}
@@ -999,8 +1006,9 @@
       consolidar: `repetí ${w(p)} (${esc(p.why)}).`,
       subir: `listo para subir de ${w(p)}: llegaste a ${p.range[1]} reps.`,
     }[p.verdict]);
-    const body = list.length
-      ? list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> ${line(x)}</div>`).join('')
+    const skips = S.skipPatterns().map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> <span class="warn-txt">lo vas salteando</span>: sin hacer en ${x.count} de las últimas ${x.of} sesiones.</div>`).join('');
+    const body = list.length || skips
+      ? skips + list.map((x) => `<div class="hist-ex"><b>${esc(x.name)}:</b> ${line(x)}</div>`).join('')
       : '<p class="muted">Nada para revisar: venís sumando reps o peso, o todavía faltan datos (hacen falta 2 sesiones del ejercicio en las últimas 5 semanas).</p>';
     return `<div class="card"><h2>Estancamientos y próximos pasos</h2>${body}
       <p class="muted">Primero reps, después peso: con el mismo peso buscás llegar al tope del rango de reps (el de la rutina; si dice un número, se deduce: 8 → 8-12, 3 → 3-6). Subís cuando llegás al tope con reserva (RIR 2 o más, o RPE 8 o menos) o dos veces seguidas. Estancado = ${S.PROG_STALL_SESSIONS} sesiones iguales sin reserva. También te avisa en la tarjeta del ejercicio cuando entrenás.</p></div>`;
